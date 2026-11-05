@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     redis_connect_timeout_seconds: float = Field(default=1, gt=0, le=10)
     redis_timeout_seconds: float = Field(default=2, gt=0, le=30)
     redis_namespace: str = Field(default="eyes", pattern=r"^[A-Za-z0-9_.-]{1,80}$")
+    rabbitmq_url: SecretStr | None = None
+    event_queue: str = Field(default="eyes.events.v1", pattern=r"^[A-Za-z0-9_.-]{1,100}$")
+    result_queue: str = Field(default="eyes.results.v1", pattern=r"^[A-Za-z0-9_.-]{1,100}$")
+    event_queue_max_bytes: int = Field(default=256 * 1024 * 1024, ge=1024 * 1024)
+    event_publish_concurrency: int = Field(default=4, ge=1, le=32)
+    event_broker_timeout_seconds: float = Field(default=3, gt=0, le=30)
     cache_ttl_seconds: int = Field(default=60, ge=1, le=3600)
     cache_query_concurrency: int = Field(default=4, ge=1, le=100)
     notification_batch_size: int = Field(default=100, ge=1, le=1000)

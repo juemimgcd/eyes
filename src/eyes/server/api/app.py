@@ -15,11 +15,14 @@ from eyes.server.api.routes import router
 from eyes.server.config import Settings
 from eyes.server.discovery.routes import router as discovery_router
 from eyes.server.domain import DomainError
+from eyes.server.event_queue.broker import EventPublisher, Publisher
+from eyes.server.event_queue.routes import router as event_queue_router
 from eyes.server.evidence.service import LocalArtifactStore
 from eyes.server.observation.routes import router as observation_router
 from eyes.server.realtime.cache import SummaryCache
 from eyes.server.realtime.hub import UpdateHub
 from eyes.server.realtime.routes import router as realtime_router
+from eyes.server.result_queue.routes import router as result_queue_router
 from eyes.server.storage.database import SCHEMA_REVISION, database
 
 
@@ -49,9 +52,13 @@ def create_app(settings: Settings | None = None):
     app.state.sessions = sessions
     app.state.updates = updates
     app.state.summary_cache = summary_cache
+    app.state.event_publisher = EventPublisher(settings)
+    app.state.result_publisher = Publisher(settings, settings.result_queue, reliable=True)
     app.state.artifacts = LocalArtifactStore(settings.artifact_root)
     app.add_middleware(RequestBoundary, settings=settings, tracer=tracer)
     app.include_router(router)
+    app.include_router(event_queue_router)
+    app.include_router(result_queue_router)
     app.include_router(observation_router)
     app.include_router(realtime_router)
     app.include_router(discovery_router)

@@ -68,6 +68,37 @@ class Record(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class EventSubmission(Record):
+    __tablename__ = "event_submissions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'persisted', 'rejected')", name="ck_event_submission_status"
+        ),
+    )
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    credential_id: Mapped[UUID] = mapped_column(ForeignKey("credentials.id"))
+    digest: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class ResultSubmission(Record):
+    __tablename__ = "result_submissions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'persisted', 'rejected')", name="ck_result_submission_status"
+        ),
+    )
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    credential_id: Mapped[UUID] = mapped_column(ForeignKey("credentials.id"))
+    work_id: Mapped[UUID] = mapped_column(ForeignKey("work_items.id"), index=True)
+    digest: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[dict | None] = mapped_column(JSONB)
+
+
 class Project(Record):
     __tablename__ = "projects"
     __table_args__ = (

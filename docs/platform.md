@@ -276,3 +276,15 @@ insufficient_evidence，只需输入/输出的评分仍可使用保留内容。�
 回滚到不支持标准协议的 Runner 前，先停止新派发并核对原任务与未释放额度，不能让旧版本
 接管不认识的远端任务。恢复数据库使用 `eyes-ops restore`，该命令更新 cache epoch，避免
 沿用恢复前的 Redis 快照。手动恢复时需自行更新 epoch 或清空专用缓存。
+
+
+## RabbitMQ 部署与备份补充（2026-11-05）
+
+当前迁移为 `0009_event_submissions`。Compose 新增持久 RabbitMQ 卷和 `event-consumer` 服务，启动前配置 `RABBITMQ_PASSWORD`。独立消费者默认最多两条数据库连接；API 发布并发默认四个，每次发布独占 AMQP 连接。新增服务不改变任务执行槽位或全局调度额度。
+
+数据库/产物备份不包含 RabbitMQ 正文。备份前暂停 Runner 新事件上传并运行消费者排空 pending 回执；`eyes-ops backup` 发现 pending 会拒绝，避免生成缺少消息正文的备份。升级后回滚迁移也要求先排空 pending。回执元数据目前不自动清理；事件正文沿用已有证据保留规则。详细配置、运行检查和限制见 [异步事件与存储验证](event-queue.md)。
+
+
+## 最终结果消费者（2026-11-05）
+
+当前迁移更新为 `0010_result_submissions`。Compose 默认启动 `result-consumer`，事件消费者移到 `queued-events` profile；需同时启用时使用 `--profile queued-events`。新增 `EYES_RESULT_QUEUE`（默认 eyes.results.v1）。备份也会拒绝 pending 最终结果，必须暂停新结果发布并排空消费者；无法应用的结果正文保留在 broker 死信队列，需要单独保管，不包含在 PostgreSQL/产物备份中。详见 [结果队列说明](result-queue.md)。

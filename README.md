@@ -2,7 +2,7 @@
 
 Eyes 的产品目标是成为 Agent 测试与执行观测平台，支持外部测试集、自定义评分、并发执行和过程追踪，并通过版本记录、回归对比及评分证据帮助开发者验证修改效果。
 
-当前已实现控制后端、独立 Runner、HTTP/Python 接入、独立评分进程、SDK 与 Web 控制台。平台现已加入持久化回归报告、CI 门槛与开发者 CLI、服务端证据等待、评分取消/重试、证据保留清理，以及存储审计和备份恢复工具。当前迁移为 `0008_report_retention`。2026-10-03 已用真实 Deta coding agent 完成 Python 接入、3 个编码任务、产物上传和独立评分，见 [接入与实测记录](integrations/deta/README.md)。2026-10-08 完成 Deta 与 Zeta 双 Python Agent 的并发、受控工作进程中断和整批取消验证，见 [Zeta 接入记录](integrations/zeta/README.md)。真实 HTTP Agent、Runner 整体重启恢复及容量验收仍待完成。实现范围见 [平台功能说明](docs/platform.md)，此前的平台验证见 [平台验证记录](docs/platform-validation.md)。下文的完整产品目标不等同于全部验收通过。
+当前已实现控制后端、独立 Runner、HTTP/Python 接入、独立评分进程、SDK 与 Web 控制台。平台现已加入持久化回归报告、CI 门槛与开发者 CLI、服务端证据等待、评分取消/重试、证据保留清理，以及存储审计和备份恢复工具。当前迁移为 `0010_result_submissions`。2026-10-03 已用真实 Deta coding agent 完成 Python 接入、3 个编码任务、产物上传和独立评分，见 [接入与实测记录](integrations/deta/README.md)。2026-10-08 完成 Deta 与 Zeta 双 Python Agent 的并发、受控工作进程中断和整批取消验证，见 [Zeta 接入记录](integrations/zeta/README.md)。真实 HTTP Agent、Runner 整体重启恢复及容量验收仍待完成。实现范围见 [平台功能说明](docs/platform.md)，此前的平台验证见 [平台验证记录](docs/platform-validation.md)。下文的完整产品目标不等同于全部验收通过。
 
 系统边界、技术选择、接入契约、故障处理和交付阶段见 [首版架构方案](docs/architecture.md)。当前实现、启动命令、API 清单和 Runner 接入约定见 [后端开发说明](docs/backend.md)，HTTP 协议、本地入口、SDK、评分器与恢复说明见 [Agent 接入文档](docs/agent-integration.md)，验证记录见 [后端验证记录](docs/backend-validation.md)。
 
@@ -24,6 +24,12 @@ uv run eyes-server
 ```
 
 另一个终端运行 `uv run eyes-scheduler`。API 默认监听 `127.0.0.1:8000`，交互文档位于 `/docs`。`eyes-admin` 创建项目并一次性输出管理令牌，业务 API 使用 Bearer 认证。Docker Compose 启动方式及更完整的说明见 [后端开发说明](docs/backend.md)。
+
+## 测试结果队列与查询缓存
+
+Runner 示例配置启用 `result_delivery = "queued"`：Python 执行结束 → 本地结果文件 → 认证 API 发布 RabbitMQ → 独立消费者写入 PostgreSQL → ACK。配置 `EYES_RABBITMQ_URL` 后，在另一终端运行 `uv run eyes-result-consumer`。Runner 在收到数据库持久化回执后清理本地待传结果；无法应用的消息保留在死信队列。
+
+执行过程事件默认使用同步接口；之前加入的异步事件链路可单独启用。旧 Runner 配置未设置 result_delivery 时仍为 direct。最终结果的发布确认、幂等消费、死信与验证记录见 [结果队列说明](docs/result-queue.md)；Redis 查询缓存的本地对照数据见 [存储验证](docs/event-queue.md)。
 
 ## 启动 Web 控制台
 

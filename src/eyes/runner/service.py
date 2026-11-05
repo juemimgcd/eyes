@@ -163,7 +163,11 @@ class RunnerService:
                         {
                             "kind": "events",
                             "work_id": work["work_item_id"],
-                            "path": "v1/events",
+                            "path": (
+                                "v1/event-submissions"
+                                if self.config.event_delivery == "queued"
+                                else "v1/events"
+                            ),
                             "body": {"schema_version": "1.0", "events": [event]},
                         },
                     )
@@ -200,12 +204,18 @@ class RunnerService:
 
     def queue_completion(self, directory, work, body):
         endpoint = "execution-result" if work["kind"] == "execute" else "score-result"
+        queued = work["kind"] == "execute" and self.config.result_delivery == "queued"
         self.outbox.enqueue(
             f"result-{work['work_item_id']}",
             {
                 "kind": "completion",
                 "work_id": work["work_item_id"],
-                "path": f"v1/work/{work['work_item_id']}/{endpoint}",
+                "path": (
+                    f"v1/work/{work['work_item_id']}/result-submissions"
+                    if queued
+                    else f"v1/work/{work['work_item_id']}/{endpoint}"
+                ),
+                "receipt_path": "v1/result-submissions" if queued else None,
                 "body": body,
                 "journal_dir": str(directory),
             },
