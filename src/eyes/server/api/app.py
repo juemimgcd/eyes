@@ -13,9 +13,13 @@ from eyes.server.api.dependencies import Database
 from eyes.server.api.middleware import RequestBoundary, validation_details
 from eyes.server.api.routes import router
 from eyes.server.config import Settings
+from eyes.server.discovery.routes import router as discovery_router
 from eyes.server.domain import DomainError
 from eyes.server.evidence.service import LocalArtifactStore
 from eyes.server.observation.routes import router as observation_router
+from eyes.server.realtime.cache import SummaryCache
+from eyes.server.realtime.hub import UpdateHub
+from eyes.server.realtime.routes import router as realtime_router
 from eyes.server.storage.database import SCHEMA_REVISION, database
 
 
@@ -26,20 +30,31 @@ def create_app(settings: Settings | None = None):
     if settings.trace_console_export:
         provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
     tracer = provider.get_tracer("eyes.server")
+    updates = UpdateHub(settings)
+    summary_cache = SummaryCache(settings)
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        engine.dispose()
-        provider.shutdown()
+        await updates.start()
+        try:
+            yield
+        finally:
+            await updates.close()
+            summary_cache.close()
+            engine.dispose()
+            provider.shutdown()
 
     app = FastAPI(title="Eyes Control API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.sessions = sessions
+    app.state.updates = updates
+    app.state.summary_cache = summary_cache
     app.state.artifacts = LocalArtifactStore(settings.artifact_root)
     app.add_middleware(RequestBoundary, settings=settings, tracer=tracer)
     app.include_router(router)
     app.include_router(observation_router)
+    app.include_router(realtime_router)
+    app.include_router(discovery_router)
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):

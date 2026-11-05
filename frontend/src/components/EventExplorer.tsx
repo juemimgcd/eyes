@@ -111,7 +111,14 @@ export function EventExplorer({
                 <code>{current.content.parent_span_id || "未提供"}</code>
               </div>
             </div>
-            <JsonBlock title="事件内容" value={current.content.data} />
+            {current.expired_at ? (
+              <p className="muted" role="status">
+                事件正文已于 {formatDate(current.expired_at)}{" "}
+                按保留策略清理。事件身份和引用仍保留。
+              </p>
+            ) : (
+              <JsonBlock title="事件内容" value={current.content.data} />
+            )}
             <JsonBlock title="证据引用" value={`event:${current.id}`} />
           </>
         ) : (

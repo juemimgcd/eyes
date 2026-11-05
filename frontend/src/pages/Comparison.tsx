@@ -185,9 +185,17 @@ export function ComparisonPage() {
                       </code>
                     </TableCell>
                     <TableCell>
-                      <GateBadge status={item.content.gate.status} />
+                      {item.expired_at ? (
+                        <span className="muted">内容已过期</span>
+                      ) : (
+                        <GateBadge status={item.content.gate.status} />
+                      )}
                     </TableCell>
-                    <TableCell>{item.content.scorers.length} 组</TableCell>
+                    <TableCell>
+                      {item.expired_at
+                        ? "—"
+                        : `${item.content.scorers.length} 组`}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

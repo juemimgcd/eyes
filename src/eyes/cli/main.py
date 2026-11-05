@@ -10,7 +10,7 @@ import httpx
 
 from eyes.contracts.comparison import ComparisonCreate
 from eyes.contracts.dataset import DatasetImport
-from eyes.contracts.target import http_origin
+from eyes.contracts.target import TargetPublish, http_origin
 from eyes.contracts.work import ExperimentBatchCreate, ExperimentCreate
 
 EXIT = {"pass": 0, "fail": 1, "inconclusive": 2}
@@ -31,6 +31,8 @@ def main():
     dataset = commands.add_parser("import-dataset")
     dataset.add_argument("--name", required=True)
     dataset.add_argument("--file", type=Path, required=True)
+    publish = commands.add_parser("publish-target")
+    publish.add_argument("--file", type=Path, required=True)
     for name in ("create", "create-batch", "compare"):
         command = commands.add_parser(name)
         command.add_argument("--file", type=Path, required=True)
@@ -75,7 +77,12 @@ def main():
             trust_env=False,
         ) as client:
             path, method, payload, headers = "v1/experiments", "GET", None, {}
-            if args.command == "import-dataset":
+            if args.command == "publish-target":
+                path, method = "v1/targets", "POST"
+                payload = TargetPublish.model_validate_json(args.file.read_bytes()).model_dump(
+                    mode="json"
+                )
+            elif args.command == "import-dataset":
                 path, method = "v1/datasets/import", "POST"
                 payload = DatasetImport(name=args.name, jsonl=args.file.read_text()).model_dump(
                     mode="json"

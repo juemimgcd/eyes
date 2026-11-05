@@ -1,8 +1,11 @@
 import json
+from time import perf_counter
 
 from opentelemetry import trace
 from opentelemetry.propagate import extract
 from starlette.responses import JSONResponse
+
+from eyes.server.diagnostics import runtime_metrics
 
 
 class RequestBoundary:
@@ -15,6 +18,20 @@ class RequestBoundary:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        started = perf_counter()
+        original_send = send
+
+        async def measured_send(message):
+            if message["type"] == "http.response.start":
+                elapsed = perf_counter() - started
+                failed = message["status"] >= 400
+                runtime_metrics.observe("http_response_headers", elapsed, failed=failed)
+                route = scope.get("route")
+                if route is not None and route.path == "/v1/work/claim":
+                    runtime_metrics.observe("claim_response_headers", elapsed, failed=failed)
+            await original_send(message)
+
+        send = measured_send
         artifact = scope["method"] == "PUT" and scope["path"].startswith("/v1/artifacts/")
         limit = self.settings.max_artifact_bytes if artifact else self.settings.max_request_bytes
         headers = {

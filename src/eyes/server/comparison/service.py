@@ -11,10 +11,12 @@ from eyes.server.domain import DomainError, digest, scoped
 from eyes.server.experiments.service import summary
 from eyes.server.storage.database import scheduling_lock
 from eyes.server.storage.models import (
+    Artifact,
     Attempt,
     CaseRun,
     CaseVersion,
     ComparisonReport,
+    Event,
     Experiment,
     Manifest,
     ScoreRun,
@@ -40,6 +42,20 @@ def capture(session, experiment, overrides, scorer_ids):
         if attempt.status == "succeeded":
             selected.setdefault(attempt.case_run_id, attempt)
     selected_ids = {attempt.id for attempt in selected.values()}
+    expired_events = set(
+        session.scalars(
+            select(Event.id).where(
+                Event.attempt_id.in_(selected_ids), Event.expired_at.is_not(None)
+            )
+        )
+    )
+    expired_artifacts = set(
+        session.scalars(
+            select(Artifact.id).where(
+                Artifact.attempt_id.in_(selected_ids), Artifact.status == "expired"
+            )
+        )
+    )
     scores = session.scalars(
         select(ScoreRun)
         .join(Attempt)
@@ -84,7 +100,20 @@ def capture(session, experiment, overrides, scorer_ids):
                 "score_status": score.status if score else None,
                 "manifest_id": str(manifest.id) if manifest else None,
                 "manifest_digest": manifest.digest if manifest else None,
-                "evidence_expired": bool(attempt and attempt.evidence_expired_at),
+                "evidence_expired": bool(
+                    (attempt and attempt.evidence_expired_at)
+                    or (
+                        manifest
+                        and (
+                            expired_events.intersection(
+                                UUID(value) for value in manifest.content["event_ids"]
+                            )
+                            or expired_artifacts.intersection(
+                                UUID(value) for value in manifest.content["artifact_ids"]
+                            )
+                        )
+                    )
+                ),
                 "verdict": (score.result or {}).get("verdict") if score else None,
                 "value": (score.result or {}).get("value") if score else None,
                 "evidence_refs": (score.result or {}).get("evidence_refs", []) if score else [],
@@ -116,6 +145,8 @@ def create(session, project_id, key, request: ComparisonCreate):
             raise DomainError(
                 409, "idempotency_conflict", "same key has different comparison parameters"
             )
+        if previous.expired_at is not None:
+            raise DomainError(410, "report_expired", "comparison report content has expired")
         return previous
     baseline = scoped(session, Experiment, request.baseline_id, project_id)
     candidate = scoped(session, Experiment, request.candidate_id, project_id)

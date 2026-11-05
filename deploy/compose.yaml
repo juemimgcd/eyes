@@ -8,10 +8,23 @@ x-control: &control
   environment: &environment
     EYES_DATABASE_URL: postgresql+psycopg://eyes:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/eyes
     EYES_ARTIFACT_ROOT: /app/data/artifacts
+    EYES_DATABASE_POOL_SIZE: ${EYES_DATABASE_POOL_SIZE:-8}
+    EYES_DATABASE_MAX_OVERFLOW: ${EYES_DATABASE_MAX_OVERFLOW:-0}
+    EYES_DATABASE_POOL_TIMEOUT_SECONDS: ${EYES_DATABASE_POOL_TIMEOUT_SECONDS:-5}
+    EYES_MAX_PENDING_EXECUTION_RUNS: ${EYES_MAX_PENDING_EXECUTION_RUNS:-100000}
+    EYES_REDIS_URL: redis://redis:6379/0
+    EYES_REDIS_MAX_CONNECTIONS: ${EYES_REDIS_MAX_CONNECTIONS:-16}
+    EYES_REDIS_NAMESPACE: ${EYES_REDIS_NAMESPACE:-eyes}
+    EYES_CACHE_TTL_SECONDS: ${EYES_CACHE_TTL_SECONDS:-60}
+    EYES_CACHE_QUERY_CONCURRENCY: ${EYES_CACHE_QUERY_CONCURRENCY:-4}
     EYES_GLOBAL_EXECUTION_LIMIT: ${EYES_GLOBAL_EXECUTION_LIMIT:-16}
     EYES_GLOBAL_SCORE_LIMIT: ${EYES_GLOBAL_SCORE_LIMIT:-4}
     EYES_SCORE_SUBMISSION_GRACE_SECONDS: ${EYES_SCORE_SUBMISSION_GRACE_SECONDS:-60}
     EYES_EVIDENCE_RETENTION_DAYS: ${EYES_EVIDENCE_RETENTION_DAYS:-0}
+    EYES_EVENT_RETENTION_DAYS: ${EYES_EVENT_RETENTION_DAYS:-0}
+    EYES_ARTIFACT_RETENTION_DAYS: ${EYES_ARTIFACT_RETENTION_DAYS:-0}
+    EYES_REPORT_RETENTION_DAYS: ${EYES_REPORT_RETENTION_DAYS:-0}
+    EYES_NOTIFICATION_RETENTION_DAYS: ${EYES_NOTIFICATION_RETENTION_DAYS:-7}
     EYES_PENDING_ARTIFACT_TTL_HOURS: ${EYES_PENDING_ARTIFACT_TTL_HOURS:-24}
     EYES_ORPHAN_ARTIFACT_GRACE_HOURS: ${EYES_ORPHAN_ARTIFACT_GRACE_HOURS:-24}
     EYES_MAX_SCORE_INPUT_BYTES: ${EYES_MAX_SCORE_INPUT_BYTES:-33554432}
@@ -19,6 +32,16 @@ x-control: &control
     - artifacts:/app/data/artifacts
 
 services:
+  redis:
+    image: redis:7.4.9-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   postgres:
     image: postgres:18.6
     environment:
@@ -71,9 +94,26 @@ services:
   scheduler:
     <<: *control
     command: ["eyes-scheduler"]
+    environment:
+      <<: *environment
+      EYES_DATABASE_POOL_SIZE: 2
     depends_on:
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  publisher:
+    <<: *control
+    command: ["eyes-publisher"]
+    environment:
+      <<: *environment
+      EYES_DATABASE_POOL_SIZE: 2
+      EYES_REDIS_MAX_CONNECTIONS: 2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   maintenance:

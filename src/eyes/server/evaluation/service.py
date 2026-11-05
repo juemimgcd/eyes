@@ -231,5 +231,6 @@ def retry(session, project_id, score_id):
     attempt = session.get(Attempt, original.attempt_id)
     manifest = session.get(Manifest, original.manifest_id)
     # A retry keeps precisely the same evidence; explicit rescore selects newer evidence.
+    view(session, manifest)
     scores = enqueue(session, attempt, manifest, [original.scorer_id])
     return scores[0]

@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Search, Plug, Unplug, X } from "lucide-react";
@@ -11,6 +18,7 @@ import {
 } from "react-router-dom";
 import { Api } from "./api";
 import { ConnectionContext } from "./connection";
+import { useRealtime } from "./hooks/use-realtime";
 import { navigation, navigationGroups } from "./navigation";
 import { Dialog, ErrorNotice, Eye, Loading } from "./components/ui";
 import {
@@ -103,6 +111,12 @@ export default function App() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const queryClient = useQueryClient();
+  const expireConnection = useCallback(() => {
+    queryClient.clear();
+    setApi(null);
+    setConnectionOpen(true);
+  }, [queryClient]);
+  const realtime = useRealtime(api, expireConnection);
   const location = useLocation();
   const current = navigation.find((item) =>
     location.pathname.startsWith(item.url),
@@ -135,6 +149,7 @@ export default function App() {
         >
           <WorkspaceShell
             api={api}
+            realtime={realtime}
             pageName={pageName}
             openConnection={openConnection}
             quickOpen={quickOpen}
@@ -208,6 +223,7 @@ export default function App() {
 
 function WorkspaceShell({
   api,
+  realtime,
   pageName,
   openConnection,
   quickOpen,
@@ -215,6 +231,7 @@ function WorkspaceShell({
   children,
 }: {
   api: Api | null;
+  realtime: "offline" | "connecting" | "live" | "polling";
   pageName: string;
   openConnection: () => void;
   quickOpen: boolean;
@@ -287,7 +304,14 @@ function WorkspaceShell({
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span>项目连接</span>
                   <span className="console-project-note">
-                    {api ? "已认证" : "尚未连接"}
+                    {
+                      {
+                        offline: "尚未连接",
+                        connecting: "正在连接更新",
+                        live: "实时更新已连接",
+                        polling: "定期同步 · 实时连接暂不可用",
+                      }[realtime]
+                    }
                   </span>
                 </span>
                 <ChevronDown className="ml-auto group-data-[collapsible=icon]:hidden" />

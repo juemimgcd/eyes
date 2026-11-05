@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -20,6 +21,45 @@ def now() -> datetime:
 
 class Base(DeclarativeBase):
     pass
+
+
+class CacheEpoch(Base):
+    __tablename__ = "cache_epoch"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    epoch: Mapped[UUID]
+
+
+class ResourceRevision(Base):
+    __tablename__ = "resource_revisions"
+    project_id: Mapped[UUID] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30), primary_key=True)
+    resource_id: Mapped[UUID] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationOutbox(Base):
+    __tablename__ = "notification_outbox"
+    project_id: Mapped[UUID] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30), primary_key=True)
+    resource_id: Mapped[UUID] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    claim_token: Mapped[UUID | None]
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failures: Mapped[int] = mapped_column(default=0)
+
+
+class EventReceipt(Base):
+    __tablename__ = "event_receipts"
+    __table_args__ = (UniqueConstraint("project_id", "kind", "resource_id", "receive_version"),)
+    kind: Mapped[str] = mapped_column(String(30), primary_key=True)
+    event_id: Mapped[UUID] = mapped_column(primary_key=True)
+    project_id: Mapped[UUID]
+    resource_id: Mapped[UUID]
+    receive_version: Mapped[int] = mapped_column(BigInteger)
 
 
 class Record(Base):
@@ -174,6 +214,15 @@ class Runner(Record):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+class AgentDiscovery(Record):
+    __tablename__ = "agent_discoveries"
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    runner_id: Mapped[UUID] = mapped_column(ForeignKey("runners.id"), unique=True)
+    request: Mapped[dict] = mapped_column(JSONB)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    result: Mapped[dict | None] = mapped_column(JSONB)
+
+
 class Attempt(Record):
     __tablename__ = "attempts"
     case_run_id: Mapped[UUID] = mapped_column(ForeignKey("case_runs.id"), index=True)
@@ -303,3 +352,4 @@ class ComparisonReport(Record):
     request_digest: Mapped[str] = mapped_column(String(64))
     content: Mapped[dict] = mapped_column(JSONB)
     digest: Mapped[str] = mapped_column(String(64))
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

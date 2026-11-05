@@ -58,5 +58,5 @@ class ArtifactMetadata(Contract):
 
 class EvidenceClose(Contract):
     status: Literal["sealed", "partial", "unavailable"]
-    dropped_events: int = Field(ge=0)
+    dropped_events: int | None = Field(ge=0)
     details: Payload = Field(default_factory=dict)

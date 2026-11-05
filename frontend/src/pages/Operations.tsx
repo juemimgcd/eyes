@@ -20,7 +20,6 @@ export function OperationsPage() {
     queryFn: ({ signal }) =>
       api!.request<Operations>("/v1/operations", { signal }),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const ready = useQuery({
     queryKey: ["ready"],
@@ -30,7 +29,6 @@ export function OperationsPage() {
         { signal },
       ),
     enabled: !!api,
-    refetchInterval: 15000,
   });
   const total = (kind: string, status: string) =>
     query.data

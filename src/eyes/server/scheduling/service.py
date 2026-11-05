@@ -92,6 +92,10 @@ def reservations(session: Session, kind: str, **filters):
 def supports_target(capabilities: dict, target: dict) -> bool:
     requested = target["capabilities"]
     adapter = requested["adapter"]
+    if adapter == "agent_protocol":
+        return adapter in capabilities["adapters"] and http_origin(
+            target["config"]["base_url"]
+        ) in capabilities.get("http_origins", [])
     if adapter == "python":
         available = capabilities.get("python_agents", {}).get(target["config"].get("agent"))
         if available is None:
@@ -137,6 +141,16 @@ def claim(session: Session, credential: Credential, request: WorkClaim, settings
     if request.kind not in credential.work_kinds:
         raise DomainError(403, "work_kind", "credential does not authorize this work kind")
     runner.last_seen_at = now()
+    runner_limit = runner.capabilities.get(
+        "execution_slots" if request.kind == "execute" else "score_slots"
+    )
+    # Persisted reservations survive Runner restarts; an empty local task set must
+    # not allow new work to consume slots still held by uncertain executions.
+    if (
+        runner_limit is not None
+        and reservations(session, request.kind, runner_id=runner.id) >= runner_limit
+    ):
+        return None
     project = session.get(Project, credential.project_id)
     global_limit = (
         settings.global_execution_limit
@@ -516,7 +530,15 @@ def cancel(session: Session, project_id: UUID, experiment_id: UUID):
     return experiment
 
 
-def resolve(session: Session, credential: Credential, attempt_id: UUID, resolution: Resolution):
+def resolve(
+    session: Session,
+    credential: Credential,
+    attempt_id: UUID,
+    resolution: Resolution,
+    *,
+    source="manager_reconciliation",
+    remote=None,
+):
     scheduling_lock(session)
     attempt = scoped(session, Attempt, attempt_id, credential.project_id, lock=True)
     if attempt.status not in {"unknown", "cancel_requested"}:
@@ -533,11 +555,17 @@ def resolve(session: Session, credential: Credential, attempt_id: UUID, resoluti
             attempt_id=attempt_id,
             credential_id=credential.id,
             previous_status=attempt.status,
-            content=evidence.redact(resolution.model_dump(mode="json")),
+            content=evidence.redact(
+                {
+                    **resolution.model_dump(mode="json"),
+                    "source": source,
+                    "remote_observation": remote,
+                }
+            ),
         )
     )
     attempt.status = resolution.status
-    attempt.finished_at = now()
+    attempt.finished_at = None if resolution.status == "unknown" else now()
     attempt.evidence_status = "partial"
     # The original submission remains in ResolutionRecord/previous result. Explicit
     # reconciliation is a new sourced fact, never an automatic lease-expiry success.
@@ -548,10 +576,13 @@ def resolve(session: Session, credential: Credential, attempt_id: UUID, resoluti
         "output": evidence.redact(resolution.output),
         "error": resolution.reason,
         "previous_result": previous_result,
-        "source": "manager_reconciliation",
+        "source": source,
+        "remote_observation": evidence.redact(remote),
+        "stopped_confirmed": True,
+        "dropped_events": remote["result"]["evidence"]["dropped_events"] if remote else None,
     }
     session.get(CaseRun, attempt.case_run_id).status = resolution.status
-    work.status = "completed"
+    work.status = "unknown" if resolution.status == "unknown" else "completed"
     work.reserved = False
     work.lease_token = None
     work.lease_expires_at = None
@@ -566,6 +597,52 @@ def resolve(session: Session, credential: Credential, attempt_id: UUID, resoluti
         )
     refresh_experiment(session, work.experiment_id)
     return attempt
+
+
+def reconcile_protocol(session, credential, work_id, runner_id, remote):
+    scheduling_lock(session)
+    runner = authorized_runner(session, credential, runner_id)
+    work = scoped(session, WorkItem, work_id, credential.project_id, lock=True)
+    authorize_work(credential, work)
+    if work.runner_id != runner.id or work.plugin != "agent_protocol" or work.kind != "execute":
+        raise DomainError(403, "work_scope", "Runner does not own this protocol execution")
+    attempt = session.get(Attempt, work.attempt_id, with_for_update=True)
+    if (
+        remote.attempt_id != attempt.id
+        or remote.task_id != work.case_run_id
+        or (attempt.remote_operation_id and str(remote.run_id) != attempt.remote_operation_id)
+    ):
+        raise DomainError(409, "remote_identity", "remote snapshot does not match this execution")
+    previous = (attempt.result or {}).get("remote_observation")
+    content = remote.model_dump(mode="json")
+    if previous and remote.revision <= previous["revision"]:
+        if remote.revision == previous["revision"] and {
+            key: value for key, value in content.items() if key != "observed_at"
+        } != {key: value for key, value in previous.items() if key != "observed_at"}:
+            raise DomainError(
+                409, "remote_revision_conflict", "remote revision has conflicting content"
+            )
+        return attempt
+    if remote.result is None or not remote.result.stopped_confirmed:
+        raise DomainError(
+            409, "stop_unconfirmed", "remote stop is not confirmed; capacity is retained"
+        )
+    result = resolve(
+        session,
+        credential,
+        attempt.id,
+        Resolution(
+            status=remote.status,
+            output=remote.result.output,
+            reason=f"Agent protocol run {remote.run_id} revision {remote.revision}",
+            stopped_confirmed=True,
+        ),
+        source="agent_protocol_reconciliation",
+        remote=content,
+    )
+    attempt.remote_operation_id = str(remote.run_id)
+    attempt.cleanup_status = remote.result.cleanup_status
+    return result
 
 
 def sweep(session: Session, settings: Settings):

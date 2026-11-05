@@ -91,7 +91,6 @@ export function ExperimentsPage() {
         { signal },
       ),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const datasets = useQuery({
     queryKey: ["catalog", "datasets"],

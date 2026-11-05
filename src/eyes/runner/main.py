@@ -9,7 +9,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from eyes.agent_protocol.client import AgentClient
+from eyes.agent_protocol.target import discovered_target, validate_target
 from eyes.runner.config import load_config
+from eyes.runner.files import resolve_secrets
 from eyes.runner.service import RunnerService
 
 
@@ -70,6 +73,35 @@ async def run(config, token, once):
         await service.run(once)
     finally:
         await service.client.close()
+        await service.agent_clients.close()
+        await service.recovery_clients.close()
+
+
+async def discover(config, arguments):
+    refs = {"token": f"env:{arguments.credential_env}"} if arguments.credential_env else {}
+    secrets = resolve_secrets(refs, config.secret_env_allowlist, config.token_env)
+    client = AgentClient(
+        arguments.base_url,
+        secrets.get("token"),
+        allowed_origins=config.allowed_http_origins,
+        connections=config.agent_connections_per_target,
+        timeout=config.agent_timeout_seconds,
+        pool_timeout=config.http_pool_timeout_seconds,
+        max_response_bytes=config.max_message_bytes,
+    )
+    try:
+        capabilities = await client.capabilities()
+        target = discovered_target(
+            arguments.name,
+            arguments.base_url,
+            capabilities,
+            arguments.credential_env,
+            arguments.concurrency,
+        )
+        validate_target(target)
+        print(target.model_dump_json(indent=2))
+    finally:
+        await client.close()
 
 
 def main():
@@ -90,10 +122,18 @@ def main():
     subcommands.add_parser(
         "status", help="inspect local outbox and retained work without contacting the server"
     )
+    discovery = subcommands.add_parser("discover", help="inspect an Agent and emit target JSON")
+    discovery.add_argument("--base-url", required=True)
+    discovery.add_argument("--name", required=True)
+    discovery.add_argument("--credential-env")
+    discovery.add_argument("--concurrency", type=int)
     arguments = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     try:
         config = load_config(arguments.config)
+        if arguments.command == "discover":
+            asyncio.run(discover(config, arguments))
+            return
         if arguments.command == "plugins":
             print(json.dumps(describe(config), ensure_ascii=False, indent=2))
             return

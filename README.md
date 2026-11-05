@@ -2,7 +2,7 @@
 
 Eyes 的产品目标是成为 Agent 测试与执行观测平台，支持外部测试集、自定义评分、并发执行和过程追踪，并通过版本记录、回归对比及评分证据帮助开发者验证修改效果。
 
-当前已实现控制后端、独立 Runner、HTTP/Python 接入、独立评分进程、SDK 与 Web 控制台。平台现已加入持久化回归报告、CI 门槛与开发者 CLI、服务端证据等待、评分取消/重试、证据保留清理，以及存储审计和备份恢复工具。当前迁移为 `0004_experiment_batches`。2026-10-03 已用真实 Deta coding agent 完成 Python 接入、3 个编码任务、产物上传和独立评分，见 [接入与实测记录](integrations/deta/README.md)。2026-10-08 完成 Deta 与 Zeta 双 Python Agent 的并发、受控工作进程中断和整批取消验证，见 [Zeta 接入记录](integrations/zeta/README.md)。真实 HTTP Agent、Runner 整体重启恢复及容量验收仍待完成。实现范围见 [平台功能说明](docs/platform.md)，此前的平台验证见 [平台验证记录](docs/platform-validation.md)。下文的完整产品目标不等同于全部验收通过。
+当前已实现控制后端、独立 Runner、HTTP/Python 接入、独立评分进程、SDK 与 Web 控制台。平台现已加入持久化回归报告、CI 门槛与开发者 CLI、服务端证据等待、评分取消/重试、证据保留清理，以及存储审计和备份恢复工具。当前迁移为 `0008_report_retention`。2026-10-03 已用真实 Deta coding agent 完成 Python 接入、3 个编码任务、产物上传和独立评分，见 [接入与实测记录](integrations/deta/README.md)。2026-10-08 完成 Deta 与 Zeta 双 Python Agent 的并发、受控工作进程中断和整批取消验证，见 [Zeta 接入记录](integrations/zeta/README.md)。真实 HTTP Agent、Runner 整体重启恢复及容量验收仍待完成。实现范围见 [平台功能说明](docs/platform.md)，此前的平台验证见 [平台验证记录](docs/platform-validation.md)。下文的完整产品目标不等同于全部验收通过。
 
 系统边界、技术选择、接入契约、故障处理和交付阶段见 [首版架构方案](docs/architecture.md)。当前实现、启动命令、API 清单和 Runner 接入约定见 [后端开发说明](docs/backend.md)，HTTP 协议、本地入口、SDK、评分器与恢复说明见 [Agent 接入文档](docs/agent-integration.md)，验证记录见 [后端验证记录](docs/backend-validation.md)。
 
@@ -41,7 +41,7 @@ npm run dev
 
 在「多 Agent 批次」一次配置多个 Agent，每个成员独立选择测试集、评分口径和任务并发数。批次集中展示任务进度，并沿用各成员的实验、证据和评分链路。实际执行受目标隔离能力、各级容量和 Runner 槽位限制；使用、API、CLI 与升级说明见 [多 Agent 批次](docs/multi-agent-batches.md)。
 
-后续接入以语言无关的统一 Agent 协议为默认方向，避免为每个 Agent 在 Eyes 核心中增加专用调用逻辑。[协议 v1 草案](docs/agent-protocol.md) 已定义能力发现、幂等提交、状态/结果查询及可选取消、事件和产物，并提供可导出的 JSON Schema。目前只落地文档与数据契约，统一协议客户端和接入端服务尚未实现；现有 HTTP/Python 接入行为保持不变。
+后续接入以语言无关的统一 Agent 协议为默认方向，避免为每个 Agent 在 Eyes 核心中增加专用调用逻辑。[协议 v1](docs/agent-protocol.md) 已定义能力发现、幂等提交、状态/结果查询及可选取消、事件和产物，并提供可导出的 JSON Schema。当前已加入异步客户端、Runner 标准协议执行、发现 CLI、能力/输入校验、PostgreSQL 持久化包装服务和原运行核对路径。包装服务已完成初始化、启动、认证和能力发现检查，真实协议执行与故障联调仍按要求暂缓；现有 HTTP/Python 兼容接入保留。
 
 ## 启动 Agent Runner
 
@@ -165,3 +165,5 @@ uv run eyes-ops maintain
 `eyes gate` 以 0/1/2/3 区分通过、失败、无法判定和配置/服务错误。`eyes-ops maintain` 默认只预览，`--apply` 执行清理。请求格式、升级边界、备份恢复和保留配置见 [平台功能说明](docs/platform.md)。
 
 优先使用真实项目验证这些契约。首版暂不扩展攻击样例库、Agent 构建器、自动修复或大规模框架适配；这些能力需要另行评估和确认范围。
+
+本轮统一协议、资源预算、实时通知、缓存与保留策略的实现对照和验证限制见 [实现记录](docs/implementation-status.md)。

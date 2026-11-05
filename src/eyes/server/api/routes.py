@@ -7,6 +7,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import func, select
 from starlette.background import BackgroundTask
 
+from eyes.contracts.agent_protocol import AgentRun
+from eyes.contracts.base import Contract
 from eyes.contracts.comparison import ComparisonCreate
 from eyes.contracts.dataset import CaseDefinition, DatasetImport
 from eyes.contracts.evidence import ArtifactMetadata, EventBatch, EvidenceClose, ExecutionEvent
@@ -26,8 +28,16 @@ from eyes.contracts.work import (
     RunnerRegister,
     WorkClaim,
 )
-from eyes.server.api.dependencies import ArtifactReader, Database, Manager, Reader, RunnerIdentity
+from eyes.server.api.dependencies import (
+    ArtifactReader,
+    Database,
+    Manager,
+    Reader,
+    RunnerIdentity,
+    ShortReader,
+)
 from eyes.server.catalog import service as catalog
+from eyes.server.diagnostics import runtime_metrics
 from eyes.server.domain import DomainError, public_record, scoped
 from eyes.server.evaluation import service as evaluation
 from eyes.server.evidence import service as evidence
@@ -45,6 +55,7 @@ from eyes.server.storage.models import (
     Experiment,
     ExperimentBatch,
     Manifest,
+    NotificationOutbox,
     ResolutionRecord,
     Runner,
     ScoreRun,
@@ -169,10 +180,8 @@ def get_experiment(experiment_id: UUID, session: Database, user: Reader):
 
 
 @router.get("/experiments/{experiment_id}/results")
-def get_results(experiment_id: UUID, session: Database, user: Reader):
-    from eyes.server.experiments import service
-
-    return service.summary(session, scoped(session, Experiment, experiment_id, user.project_id))
+def get_results(experiment_id: UUID, request: Request, user: ShortReader):
+    return request.app.state.summary_cache.results(request, user.project_id, experiment_id)
 
 
 @router.get("/experiments/{experiment_id}/case-runs")
@@ -217,6 +226,58 @@ def claim_work(body: WorkClaim, session: Database, runner: RunnerIdentity, reque
         "schema_version": "1.0",
         "work": scheduling.claim(session, runner, body, request.app.state.settings),
     }
+
+
+@router.get("/runners/{runner_id}/reservations")
+def runner_reservations(
+    runner_id: UUID,
+    session: Database,
+    runner: RunnerIdentity,
+    after: UUID | None = None,
+    limit: Limit = 200,
+):
+    scheduling.authorized_runner(session, runner, runner_id)
+    query = select(WorkItem)
+    if after is not None:
+        query = query.where(WorkItem.id > after)
+    items = session.scalars(
+        query.where(
+            WorkItem.runner_id == runner_id,
+            WorkItem.reserved.is_(True) | (WorkItem.status == "unknown"),
+        )
+        .order_by(WorkItem.id)
+        .limit(limit)
+    ).all()
+    return {
+        "schema_version": "1.0",
+        "next_cursor": str(items[-1].id) if len(items) == limit else None,
+        "items": [
+            {
+                "work_item_id": item.id,
+                "kind": item.kind,
+                "status": item.status,
+                "attempt_id": item.attempt_id,
+                "plugin": item.plugin,
+                "reserved": item.reserved,
+                "cancel_requested": bool(
+                    item.attempt_id and session.get(Attempt, item.attempt_id).cancel_requested_at
+                ),
+            }
+            for item in items
+        ],
+    }
+
+
+class ProtocolReconciliation(Contract):
+    runner_id: UUID
+    run: AgentRun
+
+
+@router.post("/work/{work_id}/reconcile-agent")
+def reconcile_agent(
+    work_id: UUID, body: ProtocolReconciliation, session: Database, runner: RunnerIdentity
+):
+    return record(scheduling.reconcile_protocol(session, runner, work_id, body.runner_id, body.run))
 
 
 @router.post("/work/{work_id}/heartbeat")
@@ -424,7 +485,8 @@ def download_artifact(artifact_id: UUID, session: Database, user: ArtifactReader
 
 
 @router.get("/operations")
-def operations(session: Database, user: Reader):
+def operations(session: Database, user: Reader, request: Request):
+    settings = request.app.state.settings
     counts = session.execute(
         select(WorkItem.kind, WorkItem.status, func.count())
         .where(WorkItem.project_id == user.project_id)
@@ -442,6 +504,34 @@ def operations(session: Database, user: Reader):
     return {
         "schema_version": "1.0",
         "observed_at": now(),
+        "summary_cache": request.app.state.summary_cache.diagnostics(),
+        "runtime_metrics": runtime_metrics.snapshot(),
+        "resource_limits": {
+            "pending_execution_runs_per_project": settings.max_pending_execution_runs,
+            "global_execution": settings.global_execution_limit,
+            "global_scoring": settings.global_score_limit,
+            "database_pool_size_per_process": settings.database_pool_size,
+            "database_max_overflow_per_process": settings.database_max_overflow,
+            "database_pool_timeout_seconds": settings.database_pool_timeout_seconds,
+        },
+        "notifications": {
+            "redis_configured": settings.redis_url is not None,
+            "pending_resources": session.scalar(
+                select(func.count())
+                .select_from(NotificationOutbox)
+                .where(NotificationOutbox.project_id == user.project_id)
+            ),
+            "oldest_pending_at": session.scalar(
+                select(func.min(NotificationOutbox.created_at)).where(
+                    NotificationOutbox.project_id == user.project_id
+                )
+            ),
+            "largest_retry_count": session.scalar(
+                select(func.max(NotificationOutbox.failures)).where(
+                    NotificationOutbox.project_id == user.project_id
+                )
+            ),
+        },
         "work_counts": [
             {"kind": kind, "status": status, "count": count} for kind, status, count in counts
         ],
@@ -517,12 +607,17 @@ def list_comparisons(session: Database, user: Reader, limit: Limit = 50, offset:
 
 @router.get("/comparisons/{report_id}")
 def get_comparison(report_id: UUID, session: Database, user: Reader):
-    return record(scoped(session, ComparisonReport, report_id, user.project_id))
+    report = scoped(session, ComparisonReport, report_id, user.project_id)
+    if report.expired_at is not None:
+        raise DomainError(410, "report_expired", "comparison report content has expired")
+    return record(report)
 
 
 @router.get("/comparisons/{report_id}/gate")
 def comparison_gate(report_id: UUID, session: Database, user: Reader):
     report = scoped(session, ComparisonReport, report_id, user.project_id)
+    if report.expired_at is not None:
+        raise DomainError(410, "report_expired", "comparison report content has expired")
     return {
         "schema_version": "1.0",
         "report_id": report.id,

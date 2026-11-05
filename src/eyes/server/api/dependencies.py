@@ -1,10 +1,12 @@
 import hashlib
+from contextlib import contextmanager
 from typing import Annotated
 
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import event, select
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import Session
 
 from eyes.server.domain import DomainError
@@ -13,7 +15,8 @@ from eyes.server.storage.models import Credential
 bearer = HTTPBearer(auto_error=False)
 
 
-def db_session(request: Request):
+@contextmanager
+def transaction(request: Request):
     try:
         with request.app.state.sessions() as session, session.begin():
             # Acquire only when a database transaction actually starts. Requests
@@ -26,8 +29,15 @@ def db_session(request: Request):
                 ),
             )
             yield session
+    except PoolTimeout as exc:
+        raise DomainError(503, "database_busy", "database connection budget is exhausted") from exc
     except OperationalError as exc:
         raise DomainError(503, "database_unavailable", "database is not available") from exc
+
+
+def db_session(request: Request):
+    with transaction(request) as session:
+        yield session
 
 
 Database = Annotated[Session, Depends(db_session, scope="function")]
@@ -64,3 +74,20 @@ Reader = Annotated[Credential, Depends(roles("read", "manage"))]
 Manager = Annotated[Credential, Depends(roles("manage"))]
 RunnerIdentity = Annotated[Credential, Depends(roles("runner"))]
 ArtifactReader = Annotated[Credential, Depends(roles("read", "manage", "runner"))]
+
+
+def short_reader(
+    request: Request,
+    supplied: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+):
+    with transaction(request) as session:
+        credential = identity(session, supplied)
+        if credential.role not in {"read", "manage"}:
+            raise DomainError(
+                403, "permission_denied", "credential does not authorize this operation"
+            )
+        session.expunge(credential)
+        return credential
+
+
+ShortReader = Annotated[Credential, Depends(short_reader)]

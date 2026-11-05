@@ -81,14 +81,12 @@ function ExperimentView({ id }: { id: string }) {
     queryFn: ({ signal }) =>
       api!.request<Experiment>(`/v1/experiments/${id}`, { signal }),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const summary = useQuery({
     queryKey: ["summary", id],
     queryFn: ({ signal }) =>
       api!.request<Summary>(`/v1/experiments/${id}/results`, { signal }),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const runs = useQuery({
     queryKey: ["case-runs", id, page],
@@ -98,7 +96,6 @@ function ExperimentView({ id }: { id: string }) {
         { signal },
       ),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const data = experiment.data;
   const visible =
@@ -199,6 +196,11 @@ function ExperimentView({ id }: { id: string }) {
                 <ArrowUpRight size={14} />
               </Link>
             </div>
+            {summary.data?.computed_at && (
+              <p className="muted">
+                统计更新时间：{formatDate(summary.data.computed_at)}
+              </p>
+            )}
             {summary.error && (
               <ErrorNotice
                 error={summary.error}

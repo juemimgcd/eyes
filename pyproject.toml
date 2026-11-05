@@ -8,10 +8,12 @@ dependencies = [
     "alembic>=1.16,<2",
     "fastapi>=0.118.3,<1",
     "httpx>=0.28,<1",
+    "jsonschema>=4.25,<5",
     "opentelemetry-sdk>=1.38,<2",
     "psycopg[binary]>=3.3,<4",
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.11,<3",
+    "redis>=7,<8",
     "sqlalchemy>=2.0.44,<2.1",
     "uvicorn>=0.37,<1",
 ]
@@ -26,6 +28,8 @@ eyes-admin = "eyes.server.admin:main"
 eyes-runner = "eyes.runner.main:main"
 eyes = "eyes.cli.main:main"
 eyes-ops = "eyes.server.operations.main:main"
+eyes-agent = "eyes.agent_service.main:main"
+eyes-publisher = "eyes.server.realtime.publisher:main"
 
 [build-system]
 requires = ["hatchling>=1.27"]

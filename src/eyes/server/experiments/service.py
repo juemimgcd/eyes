@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from eyes.contracts.work import ExperimentCreate
@@ -60,8 +60,50 @@ def create(
         .where(CaseVersion.dataset_id == dataset.id)
         .order_by(CaseVersion.case_id)
     ).all()
+    if target.content["capabilities"]["adapter"] == "agent_protocol":
+        from eyes.agent_protocol.schema import input_validator
+
+        validator = input_validator(target.content["config"]["capabilities"]["input_schema"])
+        invalid = []
+        for case in cases:
+            errors = list(validator.iter_errors(case.content["input"]))
+            if errors:
+                invalid.append({"case_id": case.case_id, "reason": "input_schema_mismatch"})
+            if case.content.get("environment"):
+                invalid.append({"case_id": case.case_id, "reason": "environment_not_transported"})
+            if (
+                case.content.get("artifact_requirements")
+                and not target.content["config"]["capabilities"]["artifacts"]
+            ):
+                invalid.append({"case_id": case.case_id, "reason": "artifacts_not_supported"})
+        if invalid:
+            raise DomainError(422, "agent_dataset_incompatible", "dataset is incompatible", invalid)
     if len(cases) * request.repetitions > settings.max_experiment_runs:
         raise DomainError(413, "too_many_runs", "experiment exceeds configured run limit")
+    # The project row lock serializes admission, including all members of a batch.
+    # Count running and unknown work too: neither is capacity available for new work.
+    pending = session.scalar(
+        select(func.count())
+        .select_from(WorkItem)
+        .where(
+            WorkItem.project_id == project_id,
+            WorkItem.kind == "execute",
+            WorkItem.status.in_(["queued", "claimed"])
+            | ((WorkItem.status == "unknown") & WorkItem.reserved.is_(True)),
+        )
+    )
+    incoming = len(cases) * request.repetitions
+    if pending + incoming > settings.max_pending_execution_runs:
+        raise DomainError(
+            429,
+            "execution_backlog_full",
+            "project execution backlog limit reached",
+            {
+                "pending": pending,
+                "incoming": incoming,
+                "limit": settings.max_pending_execution_runs,
+            },
+        )
     experiment = Experiment(
         project_id=project_id,
         target_id=target.id,

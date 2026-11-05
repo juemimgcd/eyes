@@ -92,13 +92,22 @@ class Outbox:
                             "POST",
                             f"v1/attempts/{job['attempt_id']}/artifacts",
                             json=job["metadata"],
+                            transfer=True,
                         )
                         content = (self.pending / f"{job['key']}.content").read_bytes()
                         await client.request(
-                            "PUT", f"v1/artifacts/{response['id']}/content", content=content
+                            "PUT",
+                            f"v1/artifacts/{response['id']}/content",
+                            content=content,
+                            transfer=True,
                         )
                     else:
-                        await client.request("POST", job["path"], json=job["body"])
+                        await client.request(
+                            "POST",
+                            job["path"],
+                            json=job["body"],
+                            transfer=lane == "evidence",
+                        )
                     if job["kind"] == "completion":
                         write_json(Path(job["journal_dir"]) / "ack.json", {"acknowledged": True})
                     if job["kind"] == "evidence_close":

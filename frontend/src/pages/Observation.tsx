@@ -79,7 +79,19 @@ type ObservedRun = {
 };
 type EventContent = ObservationEvent["content"];
 type EventRecord = ObservationEvent;
-type RunDetail = ObservedRun & { events: EventRecord[]; has_more: boolean };
+type RunDetail = ObservedRun & {
+  events: EventRecord[];
+  has_more: boolean;
+  next_cursor: number;
+  epoch: string;
+};
+type ReceivedEvents = {
+  items: EventRecord[];
+  has_more: boolean;
+  next_cursor: number;
+  epoch: string;
+  reset: boolean;
+};
 
 function Status({ value }: { value: string }) {
   const names: Record<string, string> = {
@@ -121,7 +133,6 @@ export function ObservationPage() {
         { signal },
       ),
     enabled: !!api,
-    refetchInterval: 2000,
   });
   const sources = useQuery({
     queryKey: ["observation-sources"],
@@ -130,7 +141,6 @@ export function ObservationPage() {
         signal,
       }),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const rows = query.data?.items.slice(0, 50) || [];
   return (
@@ -446,28 +456,35 @@ function SourceSetup({
 export function ObservationRunPage() {
   const { id } = useParams();
   const { api } = useConnection();
-  const [limit, setLimit] = useState(200);
+  const client = useQueryClient();
   const query = useQuery<RunDetail>({
-    queryKey: ["observed-run", id, limit],
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === id ? previous : undefined,
+    queryKey: ["observed-run", id],
     queryFn: async ({ signal }) => {
-      let first: RunDetail | undefined;
-      const events: EventRecord[] = [];
-      for (let offset = 0; offset < limit; offset += 200) {
-        const value = await api!.request<RunDetail>(
-          `/v1/observation/runs/${id}?limit=200&offset=${offset}`,
+      const previous = client.getQueryData<RunDetail>(["observed-run", id]);
+      const [run, received] = await Promise.all([
+        api!.request<ObservedRun>(`/v1/observation/runs/${id}?limit=1`, {
+          signal,
+        }),
+        api!.request<ReceivedEvents>(
+          `/v1/realtime/observed_run/${id}/events?after=${previous?.next_cursor ?? 0}&limit=200${previous ? `&epoch=${previous.epoch}` : ""}`,
           { signal },
-        );
-        first ??= value;
-        events.push(...value.events);
-        first.has_more = value.has_more;
-        if (!value.has_more) break;
-      }
-      return { ...first!, events };
+        ),
+      ]);
+      // Receipt order drives retrieval; producer order only controls display.
+      // Late events with a smaller sequence still arrive after this cursor.
+      const events = [
+        ...(received.reset ? [] : (previous?.events ?? [])),
+        ...received.items,
+      ].sort((a, b) => a.content.sequence - b.content.sequence);
+      return {
+        ...run,
+        events,
+        has_more: received.has_more,
+        next_cursor: received.next_cursor,
+        epoch: received.epoch,
+      };
     },
     enabled: !!api && !!id,
-    refetchInterval: 2000,
   });
   if (!api) return <Disconnected />;
   if (query.isPending) return <Loading label="正在读取执行链路" />;
@@ -615,7 +632,7 @@ export function ObservationRunPage() {
         <Button
           variant="outline"
           disabled={query.isFetching}
-          onClick={() => setLimit(limit + 200)}
+          onClick={() => void query.refetch()}
         >
           {query.isFetching ? "正在读取事件…" : "加载后续 200 条事件"}
         </Button>

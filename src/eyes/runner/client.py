@@ -13,20 +13,46 @@ class ApiError(Exception):
 
 
 class ControlClient:
-    def __init__(self, url: str, token: str, timeout: float, max_bytes=8 * 1024 * 1024):
+    def __init__(
+        self,
+        url: str,
+        token: str,
+        timeout: float,
+        max_bytes=8 * 1024 * 1024,
+        *,
+        control_connections=16,
+        transfer_connections=4,
+        pool_timeout=5,
+    ):
         self.max_bytes = max_bytes
-        self.client = httpx.AsyncClient(
-            base_url=url.rstrip("/") + "/",
-            timeout=timeout,
-            follow_redirects=False,
-            headers={"Authorization": f"Bearer {token}"},
-            trust_env=False,
-        )
+        clients = []
+        for capacity in (control_connections, transfer_connections):
+            clients.append(
+                httpx.AsyncClient(
+                    base_url=url.rstrip("/") + "/",
+                    timeout=httpx.Timeout(timeout, pool=pool_timeout),
+                    limits=httpx.Limits(
+                        max_connections=capacity, max_keepalive_connections=capacity
+                    ),
+                    follow_redirects=False,
+                    headers={"Authorization": f"Bearer {token}"},
+                    trust_env=False,
+                )
+            )
+        self.client, self.transfer_client = clients
 
-    async def request(self, method, path, *, json=None, content=None, max_bytes=None):
-        async with self.client.stream(
-            method, path.lstrip("/"), json=json, content=content
-        ) as response:
+    async def request(
+        self,
+        method,
+        path,
+        *,
+        json=None,
+        content=None,
+        max_bytes=None,
+        transfer=False,
+    ):
+        client = self.transfer_client if transfer else self.client
+        async with client.stream(method, path.lstrip("/"), json=json, content=content) as response:
             chunks, size = [], 0
             async for chunk in response.aiter_bytes():
                 size += len(chunk)
@@ -53,7 +79,9 @@ class ControlClient:
     async def artifact(self, artifact_id: str, max_bytes: int) -> bytes:
         chunks = []
         size = 0
-        async with self.client.stream("GET", f"v1/artifacts/{artifact_id}/content") as response:
+        async with self.transfer_client.stream(
+            "GET", f"v1/artifacts/{artifact_id}/content"
+        ) as response:
             if response.status_code != 200:
                 raise ApiError(response.status_code, "artifact_unavailable")
             async for chunk in response.aiter_bytes():
@@ -65,3 +93,4 @@ class ControlClient:
 
     async def close(self):
         await self.client.aclose()
+        await self.transfer_client.aclose()

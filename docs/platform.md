@@ -233,3 +233,46 @@ docker compose -p "$EYES_RESTORE_PROJECT" -f deploy/compose.yaml up -d
 ```
 
 恢复后核对 unknown 工作，再签发新 Runner 令牌。降级迁移不会恢复已清除的证据载荷；要恢复旧版本完整数据，使用升级前的备份。
+
+## 标准协议与实时链路的升级、保留和回滚
+
+当前新增迁移依次为 `0005_realtime`（资源版本、通知 Outbox、事件接收游标）、
+`0006_cache_epoch`（恢复时间线）、`0007_discovery`（Runner 连接检查）和
+`0008_report_retention`（报告过期标记）。升级前备份 PostgreSQL 与产物卷，先运行
+`alembic upgrade head`，再启动同版本 API、调度器、发布器和 Runner。Compose 已添加
+Redis 与发布器；调度器和发布器默认各使用最多 2 条 PostgreSQL 池连接，API 默认 8 条，
+另计维护、迁移和官方 Agent 包装服务的连接预算。
+
+保留配置由 `eyes-ops maintain` 统一预览；只有 `--apply` 才修改：
+
+| 配置 | 默认 | 作用 |
+| --- | --- | --- |
+| `EYES_EVIDENCE_RETENTION_DAYS` | 0 | 原始执行证据及关联产物的整体过期；0 不按年龄清理 |
+| `EYES_EVENT_RETENTION_DAYS` | 0 | 单独清理已结束、非活动执行的事件正文 |
+| `EYES_ARTIFACT_RETENTION_DAYS` | 0 | 单独过期已结束、非活动执行的 ready 产物 |
+| `EYES_PENDING_ARTIFACT_TTL_HOURS` | 24 | 非活动执行遗留的 pending 产物 |
+| `EYES_ORPHAN_ARTIFACT_GRACE_HOURS` | 24 | 未登记文件和临时文件的回收宽限 |
+| `EYES_REPORT_RETENTION_DAYS` | 0 | 独立控制固定回归报告正文；0 保留 |
+| `EYES_NOTIFICATION_RETENTION_DAYS` | 7 | 最后一次业务更新后长期未发送的通知；0 不按年龄清理 |
+
+报告过期只清除正文，保留 ID、基线/候选、创建时间、原始摘要、幂等身份及 `expired_at`。
+列表明确显示过期，详情、门槛和原请求键重放返回 `410 report_expired`；不把原结论改成通过、
+失败或无法判定。审计跳过已明确过期的报告正文摘要核验。正文清理不可由 schema downgrade
+逆转：存在过期报告时，0008 的 downgrade 会拒绝，需使用清理前备份恢复。
+
+Outbox 发布成功后立即删除；年龄清理仅处理未被有效发布租约持有的旧通知。持久执行事件、
+结果及资源版本不受影响，前端周期补查仍能读取事实。`--attempt-id` 的显式单次证据过期
+不会顺带清理报告或通知。维护默认只预览，输出新增的 `reports` 和 `notification_resources`
+清单供核对。整体证据过期优先；独立事件/产物保留期按 Attempt 结束时间计算，0 表示关闭。
+独立清理后新建 partial 清单，保留输出及未过期证据，历史清单、评分和报告保持原样；
+新清单明确列出 expired_event_ids / expired_artifact_ids。所需证据缺失的重新评分记录为
+insufficient_evidence，只需输入/输出的评分仍可使用保留内容。重试旧评分若固定清单中有
+已过期引用，返回 410；需要使用剩余证据时显式重新评分。新的回归报告也会识别所选历史
+清单的引用已经过期。迟到的封存上报不能恢复 sealed 状态。
+事件正文清理会轮换 cache epoch，使增量客户端丢弃旧正文；该维护批次同时失效其他项目
+的短期摘要缓存，但不改变持久事实。页面保留事件身份并标明正文过期，产物下载返回 410。
+
+停用实时能力时，关闭发布器并移除 API 的 Redis 配置，前端会继续低频刷新；不要删除事实表。
+回滚到不支持标准协议的 Runner 前，先停止新派发并核对原任务与未释放额度，不能让旧版本
+接管不认识的远端任务。恢复数据库使用 `eyes-ops restore`，该命令更新 cache epoch，避免
+沿用恢复前的 Redis 快照。手动恢复时需自行更新 epoch 或清空专用缓存。

@@ -246,6 +246,15 @@ Runner 使用服务端 deadline 控制墙钟超时；心跳只续租，不延长
 
 完成结果与证据上传使用各自的发送锁。通用 flush 优先发送完成结果，单项任务完成时只发送结果；证据上传失败或等待重试不会占住结果发送锁。执行封存前的证据等待仍按下述期限进行，上传缺口不能被当成完整证据。
 
+Runner 到控制 API 的 HTTP 连接分成两个长生命周期池：`control_connections` 默认 16，
+用于注册、领取、续租、状态和结果上报；`transfer_connections` 默认 4，用于事件、
+证据封存、产物和评分证据传输。`http_pool_timeout_seconds` 默认 5 秒，控制池等待期限，
+各请求的网络超时仍由 `api_timeout_seconds` 管理。大文件传输不会占用控制请求的池额度。
+这些配置不改变旧 HTTP Agent 子进程中的客户端。统一协议使用 Runner 主进程内的异步
+目标客户端，每个目标地址和凭据独立一个池；最多缓存 `execution_slots` 个池，替换空闲池，
+每池 `agent_connections_per_target` 默认 8。`agent_timeout_seconds` 默认 10 秒，
+限制一次协议 HTTP 请求的总耗时；业务 deadline 独立生效。
+
 产物登记按 Attempt 和完整元数据产生稳定 UUID，同元数据的登记重传复用 pending/ready 记录；内容上传仍校验大小和摘要。事件复用原 event_id，完成上报复用原 lease token 和结果载荷。结果重传与业务执行重试有独立含义，Runner 不因重启或失联重跑任务。
 
 执行结束后等待最多 `evidence_wait_seconds` 上报证据，再封存结果；尚未确认的上传、永久拒绝和采集缺口标为 partial。晚到证据由后端生成新清单，不覆盖已有评分；需要显式 rescore 纳入新清单。此期限用于 Runner 封存前等待，不是服务端自动调度补齐策略。
@@ -255,6 +264,14 @@ Runner 使用服务端 deadline 控制墙钟超时；心跳只续租，不延长
 `status` 显示 pending、rejected、保留工作和隔离工作数量。正常执行目录在完成确认后回收；未知/清理异常目录和评分 trace 保留供排障。每项采集和 outbox 有界，历史保留目录的总量仍需部署者设置保留策略，首版不提供自动历史清理。目录包含任务输入和租约信息，使用私有权限，维护者应按敏感运行数据管理。
 
 ## 6. 兼容性与验收边界
+
+2026-11-04 新 Runner 注册声明 `execution_slots` 和 `score_slots`。服务端将其计入原子领取
+条件，包含重启前尚未释放的预留。升级时先部署支持新字段的控制端，再升级 Runner；
+已有活动预留时不能修改注册能力，需先完成或核对旧工作。未声明槽位的旧 Runner 仍可注册。
+
+统一协议允许目标报告未知的事件丢弃数，因此 `ExecutionResult.dropped_events` 与
+`EvidenceClose.dropped_events` 现在接受 null，原整数报告仍有效。控制端和 Runner 应同步升级；
+页面和评分证据保留“未知”，不能将其计为零或完整证据。
 
 此前给 `ExecutionResult` 增加可选 `evidence_details`，给 `ScoreInput` 增加可选 `execution_root_span_id` 和 `deadline`，给 `ExecutionInput` 增加可选 `artifact_requirements`。本次审查修复增加注册字段 `python_agents/http_origins`、结果字段 `completed_at`、契约 `ScoreAssignment` 和读取完整评分输入的接口，改变评分领取 payload 的结构。它们使用已有 JSON 字段和截止时间，不需要数据库迁移。协议仍是未发布原型的 1.0，控制端、scheduler 与 Runner 必须同步升级到本源码版本。旧注册缺少别名或 origin 时，不会获得相应 Python/HTTP 工作；持有额度时不能改变注册能力，应在升级前结束或核对旧工作。
 
@@ -266,3 +283,30 @@ Runner 使用服务端 deadline 控制墙钟超时；心跳只续租，不延长
 平台迁移升级到 `0002_platform`。新实验的 `evidence_wait_seconds` 默认为 60，历史实验缺省按 0 处理；该等待发生在服务端，独立于 Runner 本地上传等待配置。Runner 将执行完成上报与证据上传分别确认，迟到证据清空后持久化提交 evidence-close，收到确认再清理正常工作目录。真实采集缺口不会因上传成功被改成 sealed。
 
 `POST /v1/attempts/{id}/evidence-close` 使用执行 Runner 令牌及原 Attempt 授权，提交 status、dropped_events、details；不会改变已发布评分。服务端等待截止之后的证据需显式 rescore。评分 retry 保留原清单，rescore 选择最新清单。升级顺序、取消行为及接口说明见 [平台说明](platform.md)。真实 Agent 联调仍按要求放在最后。
+
+### 从控制台经指定 Runner 检查标准协议服务
+
+目标 Agent 页的“接入 Agent”默认打开标准协议连接检查：填写名称、服务地址、Runner、
+并发上限和可选的凭据环境变量名。凭据值仅从 Runner 的 `secret_env_allowlist` 读取，
+服务地址仍必须位于该 Runner 的 `allowed_http_origins`。可选择“手动配置 HTTP / Python”
+继续使用原有接入方式。
+
+控制端持久化检查请求，Runner 每 5 秒查询自己的请求，最多花 30 秒读取能力接口。
+检查不调用任务提交接口。成功后页面展示待发布的能力快照；“发布目标版本”再调用原有
+发布 API，固定版本、输入 Schema 和能力。连接成功不证明业务执行、取消或隔离已通过验收。
+
+每个 Runner 只有一个检查槽位，请求有效期两分钟。未完成时重复申请返回
+`409 discovery_pending`；过期后可重试。下一次检查替换上一条诊断记录，旧检查 ID 不再可查，
+已发布的目标版本不受影响。Runner 重启可重新读取同一请求；重复读取能力没有业务执行副作用。
+结果按检查 ID 校验，过期、归属不符及冲突结果被拒绝。
+
+公开接口：管理令牌使用 `POST /v1/agent-discoveries`、
+`GET /v1/agent-discoveries/{id}`；Runner 令牌只允许查询和回报自己的
+`GET /v1/runners/{id}/discovery`、`POST /v1/runners/{id}/discovery/{check_id}`。
+控制台通过现有通知/周期刷新更新状态，也提供手动刷新。
+新增 `0007_discovery` 迁移。连接检查临时使用独立的单连接 Agent HTTP 客户端，
+不占业务执行客户端池，部署预算需为每个 Runner 额外预留最多一条目标连接。
+
+本地验证已完成：实际控制 API 创建检查（201），实际 Runner 查询官方包装服务的能力接口，
+回报 completed，随后发布目标版本（201）。没有加载或执行真实业务 Agent。
+前端类型检查、lint 和构建通过；桌面 Chrome 访问宿主不可用，尚无该表单的浏览器验证。
