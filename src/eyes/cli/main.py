@@ -23,6 +23,18 @@ class Parser(argparse.ArgumentParser):
 
 
 def main():
+    if sys.argv[1:2] == ["connect"]:
+        from pydantic import ValidationError
+
+        from eyes.cli.connect import main as connect
+
+        try:
+            connect(sys.argv[2:])
+        except ValidationError as error:
+            # Contract errors may contain the pairing code/token; preserve field diagnostics.
+            print(error.json(include_input=False, include_context=False), file=sys.stderr)
+            raise SystemExit(3) from None
+        return
     parser = Parser(description="Eyes public API and CI client (JSON output)")
     parser.add_argument("--url", default=os.environ.get("EYES_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--token-env", default="EYES_TOKEN")

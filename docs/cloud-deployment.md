@@ -36,3 +36,13 @@ curl --fail https://www.mneme.com.cn/eyes/api/health/ready
 ```
 
 Compose 需要 >=2.24.4（云端覆盖文件使用 `!reset` / `!override`）。部署脚本使用 Bash、flock、curl；服务器需安装 Docker Engine 与 Compose。`workflow_dispatch` 可以重试最新 main；不要通过修改 `latest` 标签绕过按提交部署。
+
+## 2026-11-05：配对功能源码快照部署
+
+经用户明确授权，以本地已检查源码快照 `pairing-20261105-2dde9e32f849` 部署了新配对功能，当次发布目录为 `/opt/eyes/releases/pairing-20261105-2dde9e32f849`。基础后端是原 `e1cba89d6f4fc27f73dcdf205a9c3581305c93fa` 镜像，覆盖本次完整 `src/` 与迁移；前端使用 `/eyes/` 基址重新构建。发布目录保留源文件摘要、构建文件、Compose 与镜像引用，可核对实际内容。
+
+原前端 GHCR 基础层下载停滞，本次从正在运行的原前端导出文件系统，再导入为 `eyes-frontend:pairing-runtime-base-20261105`（镜像摘要 `sha256:9050b609d43241a1f2615940973b32718a519bc090e76173f0475642925bb48a`），恢复原 Nginx entrypoint/CMD 后复制新静态资源。构建完成后才进行备份和切换，未修改公网 Nginx 入口。
+
+迁移前备份为 `/opt/eyes/backups/20261105T082354Z-before-pairing.dump`。数据库升级到 `0011_agent_pairings`，公网与本机 readiness 均成功，API/前端及依赖服务正常。新配对流程的真实 pi 评测结果见 [主动连接记录](connector.md#2026-11-05公网配对与本机-pi-实测)。
+
+以上记录首次联调时的临时源码快照。配对功能及 `0011_agent_pairings` 迁移现已纳入同一发布变更，后续通过 main 的自动部署流程构建同提交镜像。线上实际版本以 `/opt/eyes/current` 和容器镜像引用为准。不要从不含该迁移的旧提交重部署：旧代码的 readiness 期望 `0010_result_submissions`；回退须按备份和迁移兼容性单独处理。

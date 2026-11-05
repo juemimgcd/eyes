@@ -55,7 +55,8 @@ class PythonAdapter:
             invoke(self.binding.prepare, request, self.context)
 
     def execute(self, request):
-        return execution_result(invoke(self.binding.entry_point, request, self.context))
+        payload = request.input if self.binding.input_mode == "input" else request
+        return execution_result(invoke(self.binding.entry_point, payload, self.context))
 
     def cleanup(self, request):
         if self.binding.cleanup:

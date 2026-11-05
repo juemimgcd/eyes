@@ -1,5 +1,5 @@
 import { formatDate } from "../format";
-import { AgentDiscoveryDialog } from "../components/AgentDiscoveryDialog";
+import { AgentConnectDialog } from "../components/AgentConnectDialog";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -276,7 +276,7 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
       )}
       {open &&
         (kind === "targets" && !manual ? (
-          <AgentDiscoveryDialog
+          <AgentConnectDialog
             onClose={() => setOpen(false)}
             onManual={() => setManual(true)}
           />

@@ -13,6 +13,7 @@ from eyes.contracts.target import http_origin as origin
 class Binding(BaseModel):
     model_config = ConfigDict(extra="forbid")
     entry_point: str = Field(pattern=r"^[A-Za-z_][\w.]*:[A-Za-z_][\w.]*$")
+    input_mode: Literal["request", "input"] = "request"
     python: str = sys.executable
     import_paths: list[Path] = Field(default_factory=list)
     prepare: str | None = None

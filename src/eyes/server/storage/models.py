@@ -384,3 +384,15 @@ class ComparisonReport(Record):
     content: Mapped[dict] = mapped_column(JSONB)
     digest: Mapped[str] = mapped_column(String(64))
     expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AgentPairing(Record):
+    __tablename__ = "agent_pairings"
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    code_digest: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    credential_id: Mapped[UUID | None] = mapped_column(ForeignKey("credentials.id"))
+    target_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("target_versions.id"))
+    redemption_digest: Mapped[str | None] = mapped_column(String(64))
+    revoked: Mapped[bool] = mapped_column(default=False)
