@@ -101,6 +101,36 @@ class Outbox:
                             content=content,
                             transfer=True,
                         )
+                    elif job.get("receipt_path") or (
+                        job["kind"] == "events" and job["path"] == "v1/event-submissions"
+                    ):
+                        receipt_path = job.get("receipt_path") or "v1/event-submissions"
+                        if job.get("submission_id"):
+                            response = await client.request(
+                                "GET",
+                                f"{receipt_path}/{job['submission_id']}",
+                                transfer=lane == "evidence",
+                            )
+                        else:
+                            response = await client.request(
+                                "POST", job["path"], json=job["body"], transfer=lane == "evidence"
+                            )
+                            job["submission_id"] = response["id"]
+                            write_json(path, job)
+                        if response["status"] == "pending":
+                            # Broker acceptance is not a durable event receipt.
+                            # Keep this job so evidence-close cannot race ingestion.
+                            continue
+                        if response["status"] == "rejected":
+                            job["rejection"] = response["error"]
+                            write_json(self.rejected / path.name, job)
+                            path.unlink()
+                            logger.error(
+                                "queued_submission_rejected key=%s error=%s",
+                                job["key"],
+                                response["error"],
+                            )
+                            continue
                     else:
                         await client.request(
                             "POST",
@@ -134,6 +164,8 @@ class Outbox:
                         error.code,
                     )
                 except httpx.HTTPError, OSError:
-                    logger.warning("outbox_transport_or_disk_error key=%s", job["key"])
+                    logger.warning(
+                        "outbox_transport_or_disk_error key=%s", job["key"], exc_info=True
+                    )
                     break
             return sent

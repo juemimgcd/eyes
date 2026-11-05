@@ -76,13 +76,10 @@ RunnerIdentity = Annotated[Credential, Depends(roles("runner"))]
 ArtifactReader = Annotated[Credential, Depends(roles("read", "manage", "runner"))]
 
 
-def short_reader(
-    request: Request,
-    supplied: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
-):
+def short_identity(request, supplied, allowed):
     with transaction(request) as session:
         credential = identity(session, supplied)
-        if credential.role not in {"read", "manage"}:
+        if credential.role not in allowed:
             raise DomainError(
                 403, "permission_denied", "credential does not authorize this operation"
             )
@@ -90,4 +87,19 @@ def short_reader(
         return credential
 
 
+def short_reader(
+    request: Request,
+    supplied: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+):
+    return short_identity(request, supplied, {"read", "manage"})
+
+
+def short_runner(
+    request: Request,
+    supplied: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+):
+    return short_identity(request, supplied, {"runner"})
+
+
 ShortReader = Annotated[Credential, Depends(short_reader)]
+ShortRunner = Annotated[Credential, Depends(short_runner)]

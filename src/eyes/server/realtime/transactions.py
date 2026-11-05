@@ -17,7 +17,15 @@ def remember_changes(session, context):
     receipts = session.info.setdefault("new_event_receipts", {})
     for item in [*session.new, *session.dirty, *session.deleted]:
         if isinstance(
-            item, (m.ResourceRevision, m.NotificationOutbox, m.EventReceipt, m.CacheEpoch)
+            item,
+            (
+                m.ResourceRevision,
+                m.NotificationOutbox,
+                m.EventReceipt,
+                m.CacheEpoch,
+                m.EventSubmission,
+                m.ResultSubmission,
+            ),
         ):
             continue
         if item in session.dirty and not session.is_modified(item, include_collections=False):

@@ -681,7 +681,6 @@ def sweep(session: Session, settings: Settings):
             select(Attempt).where(Attempt.id == work.attempt_id).with_for_update()
         )
         if expired:
-            work.lease_token = None
             if attempt.execution_intent_at is None:
                 cancelled = attempt.status == "cancel_requested" or attempt.deadline <= current_time
                 attempt.status = "cancelled" if cancelled else "failed"
@@ -698,6 +697,10 @@ def sweep(session: Session, settings: Settings):
                 evidence.seal(session, attempt)
                 work.status = "completed"
                 work.reserved = False
+                # Queries in seal/mark_unknown can autoflush. Keep the claimed
+                # lease invariant until status and token can change together.
+                work.lease_token = None
+                work.lease_expires_at = None
                 run = session.get(CaseRun, work.case_run_id)
                 attempt_count = session.scalar(
                     select(func.count()).select_from(Attempt).where(Attempt.case_run_id == run.id)

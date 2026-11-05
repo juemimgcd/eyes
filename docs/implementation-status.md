@@ -41,3 +41,13 @@
 桌面 Chrome 访问宿主不可用，尝试未获得页面；静态设计检测只覆盖源码模式，不替代视觉与交互验证。
 真实 Agent 执行、评分证据、取消竞争、Runner/包装服务重启、同条件性能对比、带数据的保留/恢复
 演练仍属于后续运行验收。当前实现的功能不得被描述为已通过这些验收。
+
+
+## 2026-11-05 后续：RabbitMQ 与缓存对照
+
+用户进一步授权接入 RabbitMQ 并测试存储/缓存。当前迁移已更新为 `0009_event_submissions`，新增异步事件发布、消费回执及 Runner 持久化确认门槛。真实本地 PostgreSQL/Redis/RabbitMQ 功能检查与合成结果集 HTTP 对照见 [验证报告](event-queue.md)。这次没有运行真实 Agent 或模型，不改变上文其他功能的验收边界。
+
+
+## 最终结果链路修正
+
+用户进一步澄清要承接的是 Python 执行完的最终结果。新增 `0010_result_submissions` 与 `eyes-result-consumer`，默认示例改为结果 queued、事件 direct。消费者提交 PostgreSQL 后 ACK，业务拒绝结果保留死信消息；见 [结果队列及验证](result-queue.md)。缓存代码未修改，原 ABBA 数据仍只代表当时的本地实验汇总查询。

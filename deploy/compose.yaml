@@ -15,6 +15,8 @@ x-control: &control
     EYES_REDIS_URL: redis://redis:6379/0
     EYES_REDIS_MAX_CONNECTIONS: ${EYES_REDIS_MAX_CONNECTIONS:-16}
     EYES_REDIS_NAMESPACE: ${EYES_REDIS_NAMESPACE:-eyes}
+    EYES_RABBITMQ_URL: amqp://eyes:${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}@rabbitmq:5672/%2F
+    EYES_EVENT_QUEUE_MAX_BYTES: ${EYES_EVENT_QUEUE_MAX_BYTES:-268435456}
     EYES_CACHE_TTL_SECONDS: ${EYES_CACHE_TTL_SECONDS:-60}
     EYES_CACHE_QUERY_CONCURRENCY: ${EYES_CACHE_QUERY_CONCURRENCY:-4}
     EYES_GLOBAL_EXECUTION_LIMIT: ${EYES_GLOBAL_EXECUTION_LIMIT:-16}
@@ -32,6 +34,20 @@ x-control: &control
     - artifacts:/app/data/artifacts
 
 services:
+  rabbitmq:
+    image: rabbitmq:4.4.0-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: eyes
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
   redis:
     image: redis:7.4.9-alpine
     command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
@@ -116,6 +132,33 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  result-consumer:
+    <<: *control
+    command: ["eyes-result-consumer"]
+    environment:
+      <<: *environment
+      EYES_DATABASE_POOL_SIZE: 2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  event-consumer:
+    <<: *control
+    profiles: [queued-events]
+    command: ["eyes-event-consumer"]
+    environment:
+      <<: *environment
+      EYES_DATABASE_POOL_SIZE: 2
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
   maintenance:
     <<: *control
     profiles: [maintenance]
@@ -128,3 +171,4 @@ services:
 volumes:
   postgres:
   artifacts:
+  rabbitmq:

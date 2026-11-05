@@ -54,7 +54,7 @@ Web 与 CLI 使用同一套公开 API。业务规则不放在路由和前端中�
 | --- | --- | --- |
 | 后端与 Runner | Python、FastAPI、Pydantic | 复用 Python Agent 接入生态，以结构化协议约束输入输出 |
 | 数据访问 | SQLAlchemy、Alembic、PostgreSQL | 统一事务、迁移和任务状态；生产语义直接基于 PostgreSQL 验证 |
-| 调度 | PostgreSQL 工作表、短事务领取、租约与心跳 | 实验状态和工作入队在同一事务完成；首版不增加外部消息中间件 |
+| 调度 | PostgreSQL 工作表、短事务领取、租约与心跳 | 实验状态和工作入队在同一事务完成；RabbitMQ 承担最终执行结果及可选异步事件传输 |
 | 证据文件 | 服务端受控本地卷，元数据存 PostgreSQL | 面向单机自托管；保留 ArtifactStore 接口，横向扩展前切换共享对象存储 |
 | 追踪 | OpenTelemetry SDK、W3C Trace Context、Eyes 证据接口 | 统一链路标识；大型输入输出单独保存为证据引用 |
 | 前端 | React、TypeScript、Vite | 运行列表、执行详情和逐用例对比；组件库在 UI 阶段确定 |
@@ -253,3 +253,15 @@ contracts 不依赖 server；Runner、SDK 和 CLI 依赖公共契约，不能依
 ## 多 Agent 批次（2026-10-08）
 
 新增 ExperimentBatch → Experiment 分组。一个批次可原子创建多个 Agent 的独立实验，每个成员冻结自己的目标、测试集、评分器和执行配置，沿用现有工作队列、额度、取消及证据/评分流程。成员失败不主动取消其他成员；批次状态从成员状态派生，未知执行仍保留额度。不同测试集的质量结果分别展示。协议和升级说明见 [多 Agent 批次](multi-agent-batches.md)。
+
+
+## 异步测试事件（2026-11-05）
+
+按用户确认的范围新增 RabbitMQ 事件入库链路：Runner 本地队列通过 API 发布持久消息，独立 `eyes-event-consumer` 复用证据服务写入 PostgreSQL。数据库回执区分 pending、persisted 和 rejected；事件与最终回执在同一事务提交后 ACK。Runner 保留事件正文，直到确认 persisted；这样入队成功不会被误认为证据已完整入库。
+
+任务调度、执行结果上报、文件产物上传、评分与被动观测继续走原有接口。Redis 保持可重建汇总缓存和实时通知角色。迁移、故障边界与实测见 [异步事件与存储验证](event-queue.md)。
+
+
+## 最终结果队列修正（2026-11-05）
+
+用户明确需要 RabbitMQ 承接 Python 任务完成后的最终结果。`result_delivery=queued` 使用独立 `eyes.results.v1` 队列与 `eyes-result-consumer`，消费者调用原任务完成领域逻辑，将结果、任务状态、额度释放和 persisted 回执原子提交，之后 ACK。永久业务拒绝记录回执原因并将原消息转入 `.rejected` 死信队列。旧的事件链路保留为可选，默认事件 direct；任务调度不迁入 broker。详见 [结果队列说明](result-queue.md)。

@@ -61,7 +61,7 @@ cp deploy/.env.example deploy/.env
 openssl rand -hex 32
 ```
 
-将生成的十六进制密码写入 `deploy/.env` 的 `POSTGRES_PASSWORD`，然后运行：
+分别生成十六进制密码，写入 `deploy/.env` 的 `POSTGRES_PASSWORD` 和 `RABBITMQ_PASSWORD`，然后运行：
 
 ```sh
 docker compose --env-file deploy/.env -f deploy/compose.yaml up --build -d
@@ -199,7 +199,7 @@ API 使用 OTel SDK 创建实际 HTTP 请求 span，接收 W3C Trace Context，�
 
 ## 迁移、备份与后续验收
 
-迁移入口是 `alembic.ini` 和 `migrations/versions/`，当前 head 为 `0008_report_retention`。迁移只在显式命令/Compose migrate 服务中运行，API 启动不自动建表。升级前备份数据库和证据卷，并记录应用版本与迁移版本。恢复时需要检查每个 ready 产物的路径、大小和摘要，以及评分引用的清单。`eyes-ops backup/restore/audit` 提供可执行流程，命令和验证边界见 [平台说明](platform.md)。
+迁移入口是 `alembic.ini` 和 `migrations/versions/`，当前 head 为 `0010_result_submissions`。迁移只在显式命令/Compose migrate 服务中运行，API 启动不自动建表。升级前备份数据库和证据卷，并记录应用版本与迁移版本。恢复时需要检查每个 ready 产物的路径、大小和摘要，以及评分引用的清单。`eyes-ops backup/restore/audit` 提供可执行流程，命令和验证边界见 [平台说明](platform.md)。
 
 已提供 `eyes-server`、`eyes-scheduler`、`eyes-admin`、`eyes-runner`、开发者 CLI `eyes` 和运维 CLI `eyes-ops`。新增回归、封存和评分重试端点见 [平台说明](platform.md)。
 
@@ -338,3 +338,13 @@ REPEATABLE READ 快照内读取版本和汇总，防止把旧结果写入新版�
 清单，旧清单保持原摘要；引用已过期内容的旧评分重试返回 410，新评分按剩余证据判定。
 使用新配置在独立开发库运行维护预览和 audit 均通过；库中无执行证据，本轮没有实施正文
 删除或文件回收，不能据此宣称重新评分与部分清理已通过运行验收。
+
+
+## RabbitMQ 异步事件入库（2026-11-05）
+
+新增 `POST /v1/event-submissions` 与 `GET /v1/event-submissions/{id}`（Runner 认证），以及 `eyes-event-consumer` 进程。提交返回回执状态，pending 仅表示尚未确认 PostgreSQL 持久化，不能作为证据封存依据。原 `POST /v1/events` 同步接口保留。完整启动方式、重投与错误语义、存储性能数据见 [异步事件与存储验证](event-queue.md)。
+
+
+## 最终执行结果队列（2026-11-05）
+
+用户澄清 RabbitMQ 应接住 Python 执行完后的最终结果。新增 `POST /v1/work/{work_id}/result-submissions`、`GET /v1/result-submissions/{id}` 和 `eyes-result-consumer`。消费者复用 `scheduling.finish`，结果、状态、额度与回执同事务提交后 ACK；不可应用的结果转入确认式死信队列。示例 Runner 默认启用结果队列，过程事件默认 direct。配置、租约边界和实测见 [结果队列说明](result-queue.md)。

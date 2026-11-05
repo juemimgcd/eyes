@@ -37,6 +37,8 @@ class RunnerConfig(BaseModel):
     state_dir: Path = Path("data/runner")
     execution_slots: int = Field(default=1, ge=0, le=100)
     score_slots: int = Field(default=1, ge=0, le=100)
+    result_delivery: Literal["direct", "queued"] = "direct"
+    event_delivery: Literal["direct", "queued"] = "direct"
     poll_seconds: float = Field(default=2, ge=0.1)
     api_timeout_seconds: float = Field(default=5, ge=0.1, le=60)
     control_connections: int = Field(default=16, ge=1, le=1000)

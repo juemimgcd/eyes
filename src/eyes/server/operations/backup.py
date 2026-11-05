@@ -14,7 +14,15 @@ from sqlalchemy.engine import make_url
 from eyes.server.operations.service import audit, sha256
 from eyes.server.scheduling.service import sweep
 from eyes.server.storage.database import SCHEMA_REVISION, maintenance_lock
-from eyes.server.storage.models import Artifact, CacheEpoch, Credential, WorkItem, now
+from eyes.server.storage.models import (
+    Artifact,
+    CacheEpoch,
+    Credential,
+    EventSubmission,
+    ResultSubmission,
+    WorkItem,
+    now,
+)
 
 
 def pg_command(settings, program, container=None, bin_dir=None):
@@ -83,6 +91,16 @@ def backup(sessions, settings, destination, *, container=None, bin_dir=None):
         revision = session.scalar(text("SELECT version_num FROM alembic_version"))
         if revision != SCHEMA_REVISION:
             raise ValueError("migrate to the current revision before backup")
+        # The PostgreSQL/artifact backup does not contain RabbitMQ message bodies.
+        # A pending receipt alone cannot reconstruct an unconsumed event batch.
+        if session.scalar(
+            select(EventSubmission.id).where(EventSubmission.status == "pending").limit(1)
+        ):
+            raise ValueError("drain pending event submissions before database-only backup")
+        if session.scalar(
+            select(ResultSubmission.id).where(ResultSubmission.status == "pending").limit(1)
+        ):
+            raise ValueError("drain pending result submissions before database-only backup")
         inspected = audit(session, root)
         if inspected["status"] != "ok":
             raise ValueError("storage audit failed; refusing an inconsistent backup")

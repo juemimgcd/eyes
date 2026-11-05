@@ -8,7 +8,7 @@ from eyes.server.config import Settings
 from eyes.server.diagnostics import runtime_metrics
 from eyes.server.realtime.transactions import ControlSession
 
-SCHEMA_REVISION = "0008_report_retention"
+SCHEMA_REVISION = "0010_result_submissions"
 
 
 class MeasuredQueuePool(QueuePool):

@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import Field, field_validator
 
 from eyes.contracts.base import Contract, Payload
-from eyes.contracts.target import TargetCapabilities, http_origin
+from eyes.contracts.target import ExecutionResult, TargetCapabilities, http_origin
 
 
 class ExperimentCreate(Contract):
@@ -80,3 +80,7 @@ class ClaimedWork(Contract):
         if value.tzinfo is None:
             raise ValueError("lease expiry requires a timezone")
         return value
+
+
+class ExecutionSubmission(LeaseRequest):
+    result: ExecutionResult

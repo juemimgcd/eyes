@@ -22,6 +22,7 @@ from eyes.contracts.target import (
 )
 from eyes.contracts.work import (
     ClaimedWork,
+    ExecutionSubmission,
     ExperimentBatchCreate,
     ExperimentCreate,
     LeaseRequest,
@@ -289,10 +290,6 @@ def heartbeat(
 
 class ProgressSubmission(LeaseRequest):
     progress: ExecutionProgress
-
-
-class ExecutionSubmission(LeaseRequest):
-    result: ExecutionResult
 
 
 class ScoreSubmission(LeaseRequest):
