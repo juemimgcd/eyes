@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
     },
   };
   return {
+    base: env.VITE_BASE_PATH || "/",
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

@@ -173,3 +173,7 @@ uv run eyes-ops maintain
 优先使用真实项目验证这些契约。首版暂不扩展攻击样例库、Agent 构建器、自动修复或大规模框架适配；这些能力需要另行评估和确认范围。
 
 本轮统一协议、资源预算、实时通知、缓存与保留策略的实现对照和验证限制见 [实现记录](docs/implementation-status.md)。
+
+## 云端部署
+
+GitHub main 更新后自动构建镜像并部署到 https://www.mneme.com.cn/eyes/，配置、回退与运维说明见 [云端自动部署](docs/cloud-deployment.md)。

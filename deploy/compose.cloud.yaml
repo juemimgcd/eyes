@@ -1,0 +1,32 @@
+# Docker Compose >= 2.24.4. Merge after compose.yaml.
+x-image: &image
+  image: ${EYES_CONTROL_IMAGE:?Set EYES_CONTROL_IMAGE}
+  build: !reset null
+services:
+  postgres:
+    ports: !reset []
+  migrate:
+    <<: *image
+  api:
+    <<: *image
+    ports: !reset []
+    command: [uvicorn, eyes.server.api.app:create_app, --factory, --host, 0.0.0.0, --port, "8000", --root-path, /eyes/api]
+  scheduler:
+    <<: *image
+  publisher:
+    <<: *image
+  result-consumer:
+    <<: *image
+  event-consumer:
+    <<: *image
+  maintenance:
+    <<: *image
+  frontend:
+    image: ${EYES_FRONTEND_IMAGE:?Set EYES_FRONTEND_IMAGE}
+    build: !reset null
+    ports: !override ["127.0.0.1:8180:80"]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1/]
+      interval: 10s
+      timeout: 3s
+      retries: 6

@@ -14,7 +14,7 @@ export class Api {
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`/api${path}`, {
+      response = await fetch(`${import.meta.env.BASE_URL}api${path}`, {
         ...options,
         signal: AbortSignal.any([
           ...(options.signal ? [options.signal] : []),
@@ -89,7 +89,7 @@ export class Api {
     }
   }
   async download(id: string) {
-    const response = await fetch(`/api/v1/artifacts/${id}/content`, {
+    const response = await fetch(`${import.meta.env.BASE_URL}api/v1/artifacts/${id}/content`, {
       headers: { Authorization: `Bearer ${this.token}` },
       signal: AbortSignal.timeout(60000),
     });

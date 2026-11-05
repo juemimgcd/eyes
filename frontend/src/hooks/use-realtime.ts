@@ -125,7 +125,7 @@ export function useRealtime(api: Api | null, onExpired: () => void) {
       while (!signal.aborted) {
         try {
           // Fetch carries the in-memory Bearer token; never put it in an SSE URL.
-          const response = await fetch("/api/v1/realtime/stream", {
+          const response = await fetch(`${import.meta.env.BASE_URL}api/v1/realtime/stream`, {
             headers: {
               Authorization: `Bearer ${api!.token}`,
               Accept: "text/event-stream",
