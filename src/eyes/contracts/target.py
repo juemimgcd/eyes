@@ -73,7 +73,7 @@ class ExecutionResult(Contract):
     cleanup_status: Literal["pending", "succeeded", "failed", "unknown"]
     cleanup_error: str | None = Field(default=None, max_length=2000)
     evidence_status: Literal["sealed", "partial", "unavailable"]
-    dropped_events: int = Field(ge=0)
+    dropped_events: int | None = Field(ge=0)
     evidence_details: Payload = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -95,7 +95,7 @@ class ExecutionProgress(Contract):
 
 
 class Resolution(Contract):
-    status: Literal["succeeded", "failed", "cancelled", "timed_out"]
+    status: Literal["succeeded", "failed", "cancelled", "timed_out", "unknown"]
     reason: str = Field(min_length=1, max_length=2000)
     stopped_confirmed: Literal[True]
     output: Payload | None = None

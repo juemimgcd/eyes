@@ -47,6 +47,8 @@ class RunnerRegister(Contract):
     scorers: list[str] = Field(default_factory=list, max_length=100)
     python_agents: dict[str, TargetCapabilities] = Field(default_factory=dict, max_length=1000)
     http_origins: list[str] = Field(default_factory=list, max_length=1000)
+    execution_slots: int | None = Field(default=None, ge=0, le=100)
+    score_slots: int | None = Field(default=None, ge=0, le=100)
 
     @field_validator("http_origins")
     @classmethod

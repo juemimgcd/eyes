@@ -1,6 +1,8 @@
 # Eyes 统一 Agent 接入协议 v1
 
-状态：**协议草案与数据契约已落地，尚未接入运行时。** 本文定义接入方需要实现的外部接口，不表示当前 Eyes API 已提供这些路由，也不表示旧 HTTP/Python 适配器已经改用本协议。
+状态：**契约、异步客户端、Runner 执行/核对与持久化包装服务已实现，执行与故障联调尚未完成。**
+本文中的 `/agent/v1/` 路由由接入端提供，Eyes 控制 API 不冒充目标 Agent。
+旧 HTTP/Python 适配器保留兼容，标准协议使用独立的 `agent_protocol` 适配器。
 
 ## 1. 目标与边界
 
@@ -105,7 +107,7 @@ v1 先固定 HTTP+JSON，不同时引入 stdio、WebSocket 和多种推送路径
 
 `AgentResult` 将 `output`、执行错误、`stopped_confirmed`、`completed_at`、清理状态、证据状态及产物分别表达。四种明确终态都要求已确认停止和完成时间。unknown 不填写已确认的结果完成时间，但可以单独报告“已知停止、结果仍丢失”；停止事实不等同于业务成功事实。
 
-对于停止未确认的 unknown，Eyes 必须保留相应执行额度。已确认停止但结果未知的情况，只能通过明确核对路径释放额度，同时保留未知结果，不能伪造成功或失败。现有控制端尚未接入本协议的自动核对映射。
+对于停止未确认的 unknown，Eyes 必须保留相应执行额度。已确认停止但结果未知的情况，只能通过明确核对路径释放额度，同时保留未知结果，不能伪造成功或失败。控制端已提供 Runner 自动核对映射；停止确认、原运行身份和远端版本校验通过后才更新状态与额度。
 
 明确终态的结果不可覆盖，重新执行生成新 attempt/run。unknown 后若获得可靠事实，可以提升 revision 转为确定终态，并保留原观察与核对来源。证据后补不能覆盖旧结果引用的证据或旧评分，应走补充证据及显式重新评分流程。
 
@@ -172,8 +174,108 @@ v1 先固定 HTTP+JSON，不同时引入 stdio、WebSocket 和多种推送路径
 
 ## 12. 落地顺序与当前证据
 
-本次完成的是独立数据契约、可导出的 JSON Schema 和明确的 HTTP/状态语义。没有新增测试文件、测试用例或模拟服务；没有新增运行时路由、数据库迁移或修改现有 Runner 行为。
+当前提供独立数据契约、可导出的 JSON Schema、异步客户端与 Runner 标准协议执行路径。
+客户端检查运行身份、revision 冲突、已确定结果不可变、产物长度与摘要，限制响应大小，
+不跟随重定向且不读取代理环境变量。提交响应丢失后按原键查询，只有在协议幂等保证下
+重发原请求。取消没有得到确定结果时上报 unknown；事件/产物传输错误保留证据缺口。
 
-接下来的实现顺序：先增加唯一的统一协议客户端及目标发现/兼容校验，再提供一个接入端参考实现，最后让两个不同实现的真实 Agent 通过这个相同接口完成提交、去重查询、执行、证据读取及取消验证。参考服务必须落实上述持久化要求，不能用内存字典冒充故障恢复。
+在 Runner 所在网络执行能力发现，输出可发布的目标 JSON：
+
+```sh
+# 在 runner.toml 中允许目标 origin；使用认证时把对应环境变量加入 secret_env_allowlist。
+uv run eyes-runner --config runner.toml discover \
+  --base-url http://127.0.0.1:9000 --name my-agent \
+  --credential-env MY_AGENT_TOKEN --concurrency 1 > target.json
+uv run eyes publish-target --file target.json
+```
+
+发现只查询能力，不启动业务执行。没有认证的本机服务可以省略 `--credential-env`。
+发布版本冻结完整发现结果；输入 Schema 限制为本地 fragment 引用，避免验证过程主动访问
+外部 Schema URL。创建实验时检查用例 input，非空 environment 暂不通过标准协议传输，
+会明确拒绝；产物要求只可用于声明 artifacts 能力的目标。执行前发现能力变化时要求重新发布。
+
+当前检查覆盖 Ruff、命令入口和前端类型检查；官方包装服务已在独立 PostgreSQL 18.6
+上完成初始化、就绪检查、未认证 401 与 Runner 认证发现。尚未通过接入端执行完整任务，
+也未完成服务重启、幂等冲突、并发和停止竞争的运行验收。没有新增测试文件、测试用例
+或模拟服务。协议资源上传的产品入口与 Web 发现配置交互仍待完成。
+
+两个真实 Agent 的接入按本轮用户要求暂缓；后续完成 Web 配置流程和协议运行验证。
 
 已有 [Deta/Zeta 实测](../integrations/zeta/README.md) 可以核对协议是否覆盖并发、准备失败、未知执行、取消竞争和代码产物，但它使用的是现有 Python 适配器，**不是本统一协议的端到端验证**。Pi 的原生 RPC 到本协议的转换也尚未实现。
+
+## 13. 官方持久化包装服务
+
+`eyes-agent` 包装维护者安装的 Python 函数，不要求修改 Eyes 控制端。配置参考
+[agent-service.example.toml](../deploy/agent-service.example.toml)。业务入口签名为
+`execute(input: dict, context)`，可以同步返回 dict 或返回 awaitable；函数返回表示其业务
+执行已经结束。`context.task` 含原始任务标识和 deadline，`context.workspace` 是该运行的
+独立目录。调用 `context.emit(type, data)` 追加事件，返回是否成功记录；调用
+`context.artifact(name, bytes, media_type)` 发布产物。事件采集失败会记录丢弃与诊断，
+不覆盖业务输出。业务逻辑仍需自行完成远端资源清理，再返回输出。
+
+配置 `entry_point`、可选 `python/import_paths`、输入 Schema、隔离范围和模型凭据环境变量
+白名单。服务数据库凭据和调用方 Bearer 凭据不会传给业务子进程。独立进程用于故障隔离，
+维护者安装的代码仍是可信代码；`execution_scope="process"` 仅适用于进程组停止即能停止
+全部任务副作用的实现。只有这种声明才提供确认取消能力；external 模式异常或中断后保留 unknown。
+
+```sh
+cp deploy/agent-service.example.toml agent-service.toml
+# 配置独立 PostgreSQL 数据库地址环境变量 EYES_AGENT_DATABASE_URL，
+# 以及 clients 表引用的 MY_AGENT_TOKEN；不要把其值写入配置文件或目标快照。
+uv run eyes-agent --config agent-service.toml init-db
+uv run eyes-agent --config agent-service.toml serve --port 9000
+```
+
+包装服务使用独立 `eyes_agent_*` 表，建议独立数据库，当前包装表 revision 为 1。
+`init-db` 仅初始化包装表，不修改控制端 Alembic 迁移。一个 service_id 只允许一个
+supervisor，使用 PostgreSQL session advisory lock 持有所有权，并用持久 generation
+阻止失去所有权的旧进程迟到写入。连接池预算包含这一条长期所有权连接，其余请求与
+状态更新使用短事务；任务执行期间不持有业务行锁。
+
+接收请求时在服务入队锁中原子校验幂等键、Attempt 身份、deadline 和共享容量。
+提交之后才启动业务子进程。重启可以继续尚未开始的 accepted 任务；已经写入执行意图的
+running/cancel_requested 任务转为 unknown，不重放函数，也不按保存的 PID 杀进程。
+多个调用方用 `[clients]` 中不同的稳定 principal 区分，各自凭据只能读取自己的运行。
+
+包装服务支持事件分页与输出产物，当前声明 `resources=false`：不接受输入资源上传。
+事件、结果和产物受配置字节数/数量限制，工作目录保留至终态保留期结束。保留清理默认预览：
+
+```sh
+uv run eyes-agent --config agent-service.toml maintain
+uv run eyes-agent --config agent-service.toml maintain --apply
+```
+
+只有明确终态，且超过 `max(deadline, completed_at + terminal_retention_seconds)`，才清除
+正文、事件和文件。保留运行/幂等身份 tombstone，后续查询返回 410，不能复用旧键重跑。
+unknown 与活动任务不会自动过期。备份需停止包装服务后一起备份其 PostgreSQL 数据库和
+state_dir，再恢复两者；此包装服务备份流程尚未做恢复演练。
+
+对已核实停止的 unknown，管理员可记录核对事实：
+
+```sh
+uv run eyes-agent --config agent-service.toml resolve RUN_UUID \
+  --status unknown --stopped-confirmed --reason '填写实际核对依据'
+```
+
+这会释放包装服务容量，但保留结果未知。确认成功时使用 `--status succeeded --output output.json`；
+其他终态同理。命令只接受 unknown，保留前一状态、结果和核对理由，不能改写已经确定的终态。
+
+## 14. Runner 原运行核对
+
+Runner 使用单独一个连接的恢复客户端，每 `reconcile_interval_seconds`（默认 10 秒）
+检查平台预留及本地持久日志。只按原幂等键查询，不提交新的运行；404 或连接失败保留
+未解决状态。平台要求停止或 deadline 已过时，按目标实际能力请求取消。
+确定停止后的远端观察提交到独立核对接口，迟到事件与产物继续进入原 Attempt 的证据链。
+停止已确认、结果未知时只释放容量；确定成功后按原评分规则创建固定清单与评分任务。
+后补证据形成新清单，不替换已发布评分，超过证据等待窗口仍需显式重新评分。
+
+核对使用本地 assignment 与原配置中的 secret_refs；日志丢失时不会猜测请求或凭据，
+保留待处理预留。`remote-observation.json`、`reconciled.json` 和错误记录保留在隔离目录供排障。
+这一恢复路径已有代码，但进程/网络中断后的端到端行为仍待运行验证。
+
+容量拒绝的客户端行为：官方包装服务对未接受任务的 `429 capacity_exceeded` 返回
+`Retry-After: 1`。客户端支持秒数或 HTTP-date，在原任务截止时间内等待，再复用原请求与幂等键；
+未给出该响应头时按 1 秒处理。等待期间观察 Runner 停止/取消信号，不在取消后继续提交。
+若等待预算耗尽，保留明确拒绝原因，记为执行失败并释放额度；不把“明确未接受”记作未知执行。
+传输错误、服务端错误及不明确的协议冲突仍沿用原幂等键查询与保守 unknown 规则。
+此容量拒绝分支已完成代码核对，尚未用真实 Agent 占满容量验证。

@@ -1,0 +1,24 @@
+# Install the Agent function in this interpreter (with Eyes available), then:
+# eyes-agent --config agent-service.toml init-db
+# eyes-agent --config agent-service.toml serve --port 9000
+service_id = "my-agent"
+agent_version = "1"
+entry_point = "my_agent.integration:execute"
+database_url_env = "EYES_AGENT_DATABASE_URL"
+state_dir = "data/agent-service"
+max_concurrency = 1
+session_isolation = true
+environment_isolation = false
+# Only declare process when stopping this process group stops ALL task effects.
+execution_scope = "external"
+secret_env_allowlist = []
+# Includes one connection held by the single supervisor's ownership lock.
+database_pool_size = 4
+database_pool_timeout_seconds = 5
+terminal_retention_seconds = 604800
+
+[clients]
+eyes = "MY_AGENT_TOKEN"
+
+[input_schema]
+type = "object"

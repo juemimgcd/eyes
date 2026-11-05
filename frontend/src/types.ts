@@ -67,6 +67,7 @@ export interface Ratio {
   denominator: number;
 }
 export interface Summary {
+  computed_at?: string;
   status: string;
   planned_runs: number;
   execution_successes: number;
@@ -121,7 +122,7 @@ export interface Attempt extends RecordBase {
   result: {
     output?: Payload;
     error?: string;
-    dropped_events?: number;
+    dropped_events?: number | null;
     [key: string]: Json | undefined;
   } | null;
   score_runs?: ScoreRun[];
@@ -139,6 +140,7 @@ export interface CaseRun extends RecordBase {
   attempts: Attempt[];
 }
 export interface Event extends RecordBase {
+  expired_at?: string | null;
   producer_id: string;
   content: {
     type: string;

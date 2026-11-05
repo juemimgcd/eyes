@@ -1,19 +1,21 @@
 import hashlib
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from eyes.server.domain import DomainError, digest
-from eyes.server.evidence.service import LocalArtifactStore
+from eyes.server.evidence.service import LocalArtifactStore, seal
 from eyes.server.storage.database import maintenance_lock, scheduling_lock
 from eyes.server.storage.models import (
     Artifact,
     Attempt,
+    CacheEpoch,
     ComparisonReport,
     Event,
     EvidenceWait,
     Manifest,
+    NotificationOutbox,
     ScoreRun,
     WorkItem,
     now,
@@ -65,7 +67,9 @@ def audit(session, root):
                             "reference": identifier,
                         }
                     )
-    for report in session.scalars(select(ComparisonReport)):
+    for report in session.scalars(
+        select(ComparisonReport).where(ComparisonReport.expired_at.is_(None))
+    ):
         if digest(report.content) != report.digest:
             problems.append({"kind": "report_digest", "id": str(report.id)})
     for score in session.scalars(select(ScoreRun)):
@@ -107,7 +111,8 @@ def retained_work(session, attempt_id):
     )
 
 
-def expiration_candidates(session, settings, attempt_id=None):
+def expiration_candidates(session, settings, attempt_id=None, *, days=None):
+    retention_days = settings.evidence_retention_days if days is None else days
     query = select(Attempt).where(
         Attempt.evidence_expired_at.is_(None),
         Attempt.finished_at.is_not(None),
@@ -115,10 +120,8 @@ def expiration_candidates(session, settings, attempt_id=None):
     )
     if attempt_id:
         query = query.where(Attempt.id == attempt_id)
-    elif settings.evidence_retention_days:
-        query = query.where(
-            Attempt.finished_at < now() - timedelta(days=settings.evidence_retention_days)
-        )
+    elif retention_days:
+        query = query.where(Attempt.finished_at < now() - timedelta(days=retention_days))
     else:
         return []
     attempts = session.scalars(query.order_by(Attempt.id).with_for_update()).all()
@@ -138,6 +141,51 @@ def maintain(session, settings, *, apply=False, attempt_id=None):
     store = LocalArtifactStore(settings.artifact_root)
     attempts = expiration_candidates(session, settings, attempt_id)
     current = now()
+    expired_events = []
+    expired_artifacts = []
+    whole_ids = {attempt.id for attempt in attempts}
+    if attempt_id is None:
+        event_attempts = expiration_candidates(
+            session, settings, days=settings.event_retention_days
+        )
+        artifact_attempts = expiration_candidates(
+            session, settings, days=settings.artifact_retention_days
+        )
+        expired_events = session.scalars(
+            select(Event).where(
+                Event.attempt_id.in_(
+                    [item.id for item in event_attempts if item.id not in whole_ids]
+                ),
+                Event.expired_at.is_(None),
+            )
+        ).all()
+        expired_artifacts = session.scalars(
+            select(Artifact).where(
+                Artifact.attempt_id.in_(
+                    [item.id for item in artifact_attempts if item.id not in whole_ids]
+                ),
+                Artifact.status == "ready",
+            )
+        ).all()
+    reports = []
+    notifications = []
+    if attempt_id is None and settings.report_retention_days:
+        reports = session.scalars(
+            select(ComparisonReport).where(
+                ComparisonReport.expired_at.is_(None),
+                ComparisonReport.created_at
+                < current - timedelta(days=settings.report_retention_days),
+            )
+        ).all()
+    if attempt_id is None and settings.notification_retention_days:
+        notifications = session.scalars(
+            select(NotificationOutbox).where(
+                NotificationOutbox.updated_at
+                < current - timedelta(days=settings.notification_retention_days),
+                (NotificationOutbox.lease_until.is_(None))
+                | (NotificationOutbox.lease_until <= current),
+            )
+        ).all()
     pending = []
     if attempt_id is None:
         for artifact in session.scalars(
@@ -155,6 +203,22 @@ def maintain(session, settings, *, apply=False, attempt_id=None):
             ):
                 pending.append(artifact)
     if apply:
+        for event in expired_events:
+            event.content = {**event.content, "data": {}, "expired": True}
+            event.expired_at = current
+        for artifact in expired_artifacts:
+            artifact.status = "expired"
+        for affected in sorted({item.attempt_id for item in [*expired_events, *expired_artifacts]}):
+            seal(session, session.get(Attempt, affected))
+        if expired_events:
+            # Receipt cursors only append. Rotate their timeline so clients
+            # discard cached bodies whose rows were redacted in place.
+            session.get(CacheEpoch, 1).epoch = uuid4()
+        for report in reports:
+            report.expired_at = current
+            report.content = {}
+        for notification in notifications:
+            session.delete(notification)
         for attempt in attempts:
             attempt.evidence_expired_at = current
             attempt.evidence_status = "expired"
@@ -222,6 +286,17 @@ def maintain(session, settings, *, apply=False, attempt_id=None):
         "mode": "apply" if apply else "preview",
         "attempts": [str(a.id) for a in attempts],
         "pending_artifacts": [str(a.id) for a in pending],
+        "events": [str(event.id) for event in expired_events],
+        "artifacts": [str(artifact.id) for artifact in expired_artifacts],
+        "reports": [str(report.id) for report in reports],
+        "notification_resources": [
+            {
+                "project_id": str(item.project_id),
+                "kind": item.kind,
+                "resource_id": str(item.resource_id),
+            }
+            for item in notifications
+        ],
         "garbage_files": [p.name for p in garbage],
     }, garbage
 

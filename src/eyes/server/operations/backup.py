@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
@@ -14,7 +14,7 @@ from sqlalchemy.engine import make_url
 from eyes.server.operations.service import audit, sha256
 from eyes.server.scheduling.service import sweep
 from eyes.server.storage.database import SCHEMA_REVISION, maintenance_lock
-from eyes.server.storage.models import Artifact, Credential, WorkItem, now
+from eyes.server.storage.models import Artifact, CacheEpoch, Credential, WorkItem, now
 
 
 def pg_command(settings, program, container=None, bin_dir=None):
@@ -214,6 +214,8 @@ def restore(sessions, settings, source, *, container=None, bin_dir=None):
                 credential.revoked = True
             for work in session.scalars(select(WorkItem).where(WorkItem.status == "claimed")):
                 work.lease_expires_at = now()
+            # Restoring an old revision must never reuse a newer timeline's cache.
+            session.get(CacheEpoch, 1).epoch = uuid4()
             recovery = sweep(session, settings)
         return {
             "status": "complete",

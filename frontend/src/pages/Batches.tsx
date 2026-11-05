@@ -77,7 +77,6 @@ export function BatchesPage() {
         { signal },
       ),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const items = query.data?.items.slice(0, 50) || [];
   return (
@@ -170,7 +169,6 @@ function BatchView({ id }: { id: string }) {
     queryFn: ({ signal }) =>
       api!.request<Batch>(`/v1/experiment-batches/${id}`, { signal }),
     enabled: !!api,
-    refetchInterval: 5000,
   });
   const data = query.data;
   async function cancel() {

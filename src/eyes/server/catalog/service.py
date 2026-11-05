@@ -48,6 +48,13 @@ def reject_inline_secrets(value, path="config"):
 
 def publish(session: Session, project_id: UUID, request: TargetPublish | ScorerPublish):
     reject_inline_secrets(request.config)
+    if isinstance(request, TargetPublish) and request.capabilities.adapter == "agent_protocol":
+        from eyes.agent_protocol.target import validate_target
+
+        try:
+            validate_target(request)
+        except ValueError as exc:
+            raise DomainError(422, "invalid_agent_target", str(exc)) from exc
     content = request.model_dump(mode="json")
     model = TargetVersion if isinstance(request, TargetPublish) else ScorerVersion
     fields = {

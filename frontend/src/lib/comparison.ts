@@ -68,6 +68,7 @@ export interface ScorerComparison {
   cases: CaseComparison[];
 }
 export interface ComparisonReport extends RecordBase {
+  expired_at?: string | null;
   baseline_id: string;
   candidate_id: string;
   digest: string;

@@ -11,10 +11,12 @@ from eyes.contracts.evidence import ArtifactMetadata, ExecutionEvent
 from eyes.contracts.scorer import ScoreAssignment, ScoreInput, ScoreOutput
 from eyes.contracts.target import ExecutionInput, ExecutionResult
 from eyes.contracts.work import ClaimedWork
+from eyes.runner import discovery, protocol
 from eyes.runner.client import ApiError, ControlClient
 from eyes.runner.files import error_text, file_digest, redact, resolve_secrets, write_json
 from eyes.runner.outbox import Outbox
 from eyes.runner.process import ProcessWorker, WorkerError
+from eyes.runner.protocol import AgentClients
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +112,14 @@ class Lease:
 class RunnerService:
     def __init__(self, config, token):
         self.config = config
-        self.client = ControlClient(config.server_url, token, config.api_timeout_seconds)
+        self.client = ControlClient(
+            config.server_url,
+            token,
+            config.api_timeout_seconds,
+            control_connections=config.control_connections,
+            transfer_connections=config.transfer_connections,
+            pool_timeout=config.http_pool_timeout_seconds,
+        )
         self.outbox = Outbox(
             config.state_dir / "outbox", config.outbox_bytes, config.server_url + "\n" + token
         )
@@ -119,6 +128,15 @@ class RunnerService:
         self.runner_id = None
         self.stopping = asyncio.Event()
         self.active = {"execute": set(), "score": set()}
+        self.agent_clients = AgentClients(config)
+        self.recovery_clients = AgentClients(
+            config.model_copy(
+                update={
+                    "execution_slots": 1,
+                    "agent_connections_per_target": 1,
+                }
+            )
+        )
 
     async def progress(self, lease, state, operation=None):
         update = {"schema_version": "1.0", "state": state}
@@ -285,6 +303,8 @@ class RunnerService:
 
     async def execute(self, work, lease, directory):
         request = ExecutionInput.model_validate(work["payload"])
+        if request.target.capabilities.adapter == "agent_protocol":
+            return await protocol.execute(self, work, lease, directory)
         binding = None
         if request.target.capabilities.adapter == "python":
             binding = self.config.python_agents.get(request.target.config.get("agent"))
@@ -412,7 +432,8 @@ class RunnerService:
         except TimeoutError:
             pass
         pending, rejected = self.outbox.evidence(work["work_item_id"])
-        result.dropped_events += int(capture.get("dropped_events", 0))
+        if result.dropped_events is not None:
+            result.dropped_events += int(capture.get("dropped_events", 0))
         result.evidence_details.update(
             {
                 **capture,
@@ -430,6 +451,7 @@ class RunnerService:
                 pending,
                 rejected,
                 result.dropped_events,
+                result.dropped_events is None,
                 capture.get("capture_failures"),
                 capture.get("truncated_events"),
                 capture.get("pending_events"),
@@ -482,6 +504,7 @@ class RunnerService:
                     f"v1/work/{work['work_item_id']}/score-input",
                     json=lease.body,
                     max_bytes=self.config.max_score_input_bytes,
+                    transfer=True,
                 ),
                 remaining(deadline),
             )
@@ -619,7 +642,7 @@ class RunnerService:
                 "schema_version": "1.0",
                 "name": self.config.name,
                 "supported_schema_versions": ["1.0"],
-                "adapters": (["http"] if self.config.allowed_http_origins else [])
+                "adapters": (["http", "agent_protocol"] if self.config.allowed_http_origins else [])
                 + (["python"] if self.config.python_agents else []),
                 "scorers": ["rules", *self.config.python_scorers],
                 "python_agents": {
@@ -627,12 +650,24 @@ class RunnerService:
                     for alias, binding in self.config.python_agents.items()
                 },
                 "http_origins": self.config.allowed_http_origins,
+                "execution_slots": self.config.execution_slots,
+                "score_slots": self.config.score_slots,
             },
         )
         if registration.get("negotiated_schema_version") != "1.0":
             raise ValueError("server negotiated an unsupported protocol version")
         self.runner_id = registration["runner_id"]
         logger.info("runner_registered runner=%s", self.runner_id)
+        await self.outbox.flush(self.client)
+        # The server retains unresolved reservations, including journals lost
+        # locally. Obtain and reconcile that inventory before any new claim.
+        while not self.stopping.is_set() and not await protocol.reconcile_once(self):
+            try:
+                await asyncio.wait_for(self.stopping.wait(), self.config.reconcile_interval_seconds)
+            except TimeoutError:
+                pass
+        recovery = asyncio.create_task(protocol.reconcile_forever(self))
+        connection_checks = asyncio.create_task(discovery.serve(self))
         counts = {"execute": self.config.execution_slots, "score": self.config.score_slots}
         try:
             while not self.stopping.is_set():
@@ -685,6 +720,9 @@ class RunnerService:
                     pass
         finally:
             self.stopping.set()
+            recovery.cancel()
+            connection_checks.cancel()
+            await asyncio.gather(recovery, connection_checks, return_exceptions=True)
             await asyncio.gather(
                 *(task for tasks in self.active.values() for task in tasks), return_exceptions=True
             )
@@ -693,3 +731,5 @@ class RunnerService:
             await self.outbox.flush(self.client)
             self.reap()
             await self.client.close()
+            await self.agent_clients.close()
+            await self.recovery_clients.close()

@@ -61,11 +61,27 @@ def seal(session: Session, attempt: Attempt) -> Manifest:
     events = session.scalars(
         select(Event).where(Event.attempt_id == attempt.id).order_by(Event.created_at, Event.id)
     ).all()
+    expired_events = [event for event in events if event.expired_at is not None]
+    events = [event for event in events if event.expired_at is None]
     artifacts = session.scalars(
         select(Artifact)
-        .where(Artifact.attempt_id == attempt.id, Artifact.status == "ready")
+        .where(Artifact.attempt_id == attempt.id)
         .order_by(Artifact.created_at, Artifact.id)
     ).all()
+    expired_artifacts = [artifact for artifact in artifacts if artifact.status == "expired"]
+    artifacts = [artifact for artifact in artifacts if artifact.status == "ready"]
+    if expired_events or expired_artifacts:
+        # Late evidence-close or uploads cannot make removed content complete again.
+        attempt.evidence_status = "partial"
+        attempt.result = {
+            **(attempt.result or {}),
+            "evidence_status": "partial",
+            "evidence_details": {
+                **(attempt.result or {}).get("evidence_details", {}),
+                "expired_events": len(expired_events),
+                "expired_artifacts": len(expired_artifacts),
+            },
+        }
     references = [f"case:{run.case_version_id}:input", f"case:{run.case_version_id}:expectations"]
     if attempt.result and attempt.result.get("output") is not None:
         references.append(f"attempt:{attempt.id}:output")
@@ -81,6 +97,8 @@ def seal(session: Session, attempt: Attempt) -> Manifest:
         "references": references,
         "event_ids": [str(e.id) for e in events],
         "artifact_ids": [str(a.id) for a in artifacts],
+        "expired_event_ids": [str(event.id) for event in expired_events],
+        "expired_artifact_ids": [str(artifact.id) for artifact in expired_artifacts],
         "dropped_events": (attempt.result or {}).get("dropped_events"),
         "coverage": "declared producer boundaries only",
         "input": session.get(CaseVersion, run.case_version_id).content["input"],
@@ -169,15 +187,21 @@ def view(session: Session, manifest: Manifest):
     if manifest.expired_at:
         raise DomainError(410, "evidence_expired", "evidence payloads have expired")
     content = manifest.content
-    events = [session.get(Event, UUID(eid)).content for eid in content["event_ids"]]
-    artifacts = [public_record(session.get(Artifact, UUID(aid))) for aid in content["artifact_ids"]]
+    events = [session.get(Event, UUID(eid)) for eid in content["event_ids"]]
+    artifacts = [session.get(Artifact, UUID(aid)) for aid in content["artifact_ids"]]
+    if any(event.expired_at is not None for event in events) or any(
+        artifact.status == "expired" for artifact in artifacts
+    ):
+        raise DomainError(
+            410, "evidence_expired", "this fixed manifest references expired evidence"
+        )
     return {
         "schema_version": "1.0",
         "manifest_id": manifest.id,
         "status": content["status"],
         "references": content["references"],
-        "events": events,
-        "artifacts": artifacts,
+        "events": [event.content for event in events],
+        "artifacts": [public_record(artifact) for artifact in artifacts],
         "dropped_events": content["dropped_events"],
     }
 
@@ -324,10 +348,23 @@ def close(session, credential, attempt_id, request):
         .limit(1)
     ):
         raise DomainError(409, "uploads_pending", "pending uploads prevent sealing evidence")
+    expired_counts = {
+        "expired_events": session.scalar(
+            select(func.count(Event.id)).where(
+                Event.attempt_id == attempt_id, Event.expired_at.is_not(None)
+            )
+        ),
+        "expired_artifacts": session.scalar(
+            select(func.count(Artifact.id)).where(
+                Artifact.attempt_id == attempt_id, Artifact.status == "expired"
+            )
+        ),
+    }
+    retained_details = expired_counts if any(expired_counts.values()) else {}
     update = {
-        "evidence_status": request.status,
+        "evidence_status": "partial" if retained_details else request.status,
         "dropped_events": request.dropped_events,
-        "evidence_details": redact(request.details),
+        "evidence_details": {**redact(request.details), **retained_details},
     }
     if all((attempt.result or {}).get(k) == v for k, v in update.items()):
         return session.scalar(
@@ -337,5 +374,5 @@ def close(session, credential, attempt_id, request):
             .limit(1)
         )
     attempt.result = {**(attempt.result or {}), **update, "evidence_closed_at": now().isoformat()}
-    attempt.evidence_status = request.status
+    attempt.evidence_status = update["evidence_status"]
     return seal(session, attempt)

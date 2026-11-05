@@ -1,4 +1,5 @@
 import { formatDate } from "../format";
+import { AgentDiscoveryDialog } from "../components/AgentDiscoveryDialog";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -56,6 +57,7 @@ export function CatalogPage({ kind }: { kind: CatalogKind }) {
 function CatalogView({ kind }: { kind: CatalogKind }) {
   const { api, openConnection } = useConnection();
   const [open, setOpen] = useState(false);
+  const [manual, setManual] = useState(false);
   const [selected, setSelected] = useState<Version | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -72,7 +74,11 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
         .includes(search.toLowerCase()),
     ) || [];
   const visible = filtered.slice(page * 50, (page + 1) * 50);
-  const publish = () => (api ? setOpen(true) : openConnection());
+  const publish = () => {
+    setManual(false);
+    if (api) setOpen(true);
+    else openConnection();
+  };
   return (
     <>
       <PageHeading
@@ -268,7 +274,15 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
           {config.text}
         </div>
       )}
-      {open && <PublishDialog kind={kind} onClose={() => setOpen(false)} />}{" "}
+      {open &&
+        (kind === "targets" && !manual ? (
+          <AgentDiscoveryDialog
+            onClose={() => setOpen(false)}
+            onManual={() => setManual(true)}
+          />
+        ) : (
+          <PublishDialog kind={kind} onClose={() => setOpen(false)} />
+        ))}{" "}
       {selected && (
         <VersionDialog
           version={selected}

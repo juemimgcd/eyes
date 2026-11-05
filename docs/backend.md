@@ -199,10 +199,142 @@ API 使用 OTel SDK 创建实际 HTTP 请求 span，接收 W3C Trace Context，�
 
 ## 迁移、备份与后续验收
 
-迁移入口是 `alembic.ini` 和 `migrations/versions/`，当前 head 为 `0004_experiment_batches`。迁移只在显式命令/Compose migrate 服务中运行，API 启动不自动建表。升级前备份数据库和证据卷，并记录应用版本与迁移版本。恢复时需要检查每个 ready 产物的路径、大小和摘要，以及评分引用的清单。`eyes-ops backup/restore/audit` 提供可执行流程，命令和验证边界见 [平台说明](platform.md)。
+迁移入口是 `alembic.ini` 和 `migrations/versions/`，当前 head 为 `0008_report_retention`。迁移只在显式命令/Compose migrate 服务中运行，API 启动不自动建表。升级前备份数据库和证据卷，并记录应用版本与迁移版本。恢复时需要检查每个 ready 产物的路径、大小和摘要，以及评分引用的清单。`eyes-ops backup/restore/audit` 提供可执行流程，命令和验证边界见 [平台说明](platform.md)。
 
 已提供 `eyes-server`、`eyes-scheduler`、`eyes-admin`、`eyes-runner`、开发者 CLI `eyes` 和运维 CLI `eyes-ops`。新增回归、封存和评分重试端点见 [平台说明](platform.md)。
 
 HTTP 与 Python 通用接入功能已有实现，按本次要求暂缓真实 Agent 联调。后续恢复验收时，在可运行的 PostgreSQL 环境执行迁移，接入两个真实 Agent，运行导入、领取、执行、证据查询和独立评分。之后再验证多 Runner 限额、租约过期、取消、迟到上报和评分故障。原始结果须按 [AGENT.md](../AGENT.md) 的阶段要求保存。
 
 多 Agent 批次新增公开 API 和 CLI，在同一事务创建多份独立实验，详见 [多 Agent 批次](multi-agent-batches.md)。
+
+## 连接预算与执行积压（2026-11-04）
+
+每个控制进程建立一个 PostgreSQL Engine。`EYES_DATABASE_POOL_SIZE` 默认 8，
+`EYES_DATABASE_MAX_OVERFLOW` 默认 0，`EYES_DATABASE_POOL_TIMEOUT_SECONDS` 默认 5 秒。
+池耗尽返回 503 `database_busy`；数据库连接失败返回 503 `database_unavailable`。
+两者保留原异常 cause。部署预算需相加 API worker、scheduler、维护命令各自的池上限，
+另预留迁移和管理连接。连接上限不等同于 Agent 任务并发数。
+
+`EYES_MAX_PENDING_EXECUTION_RUNS` 默认 100000，限制每个项目中 queued、claimed，以及仍
+占用额度的 unknown 执行工作总数。已确认停止但结果未知的工作保留为 unknown，不再占积压。
+创建实验在项目行锁内检查已有积压与新增用例数；超过返回 429
+`execution_backlog_full`，details 给出 pending、incoming 和 limit。多 Agent 批次任一成员
+超限时整批事务回滚。已成功创建请求的幂等重放仍返回原记录。该限制控制新的执行入队，
+不会丢弃已接受任务，也不占用评分容量；内部准备重试在同一事务替换原工作，不增加净积压。
+
+Runner 注册可声明 `execution_slots`、`score_slots`，服务端领取在现有调度锁内同时核对
+该 Runner 的持久预留。重启后的未知工作仍占槽位，不能仅凭本地任务列表为空继续超配。
+旧注册未声明槽位时维持原有全局、项目、目标和实验限制；新 Runner 总是提交槽位声明。
+`GET /v1/operations` 的 `resource_limits` 返回当前服务配置；数据库池配置按进程解释，
+不是整个部署的实时连接计数。
+
+本轮现有检查：Ruff lint、受影响 Python 文件格式检查、`git diff --check`、Compose 配置解析。
+独立 PostgreSQL 18.6 数据库从空库迁移到 `0004_experiment_batches`，API `/health/ready`
+返回 ready，`eyes-scheduler --once` 完成空队列扫描。这些结果证明启动与迁移可用，
+尚未证明池耗尽、并发入队或重启故障场景；未新增或修改测试文件。
+
+标准协议 Runner 使用 `GET /v1/runners/{runner_id}/reservations` 查询自己持有的预留和
+未确定结果；`POST /v1/work/{work_id}/reconcile-agent` 提交带版本的远端运行观察。
+服务端验证 Runner、项目/目标范围、原 Attempt/CaseRun、远端运行 ID 和停止确认，
+只允许核对未解决状态。来源保存在 ResolutionRecord 和新清单中，不修改旧评分。
+Runner 注册后先上传本地待交付结果并完成一轮恢复清单核对，再开始领取；清单读取失败时等待重试。
+尚未过期的旧租约继续保留服务端额度，进入 unknown 后由后续后台核对处理。
+同 revision 同观察重放不生成重复核对，同 revision 内容冲突返回 409。
+`Resolution.status` 新增 unknown，用于已确认停止但结果仍无法恢复的情形：释放额度，
+保留 unknown 与未解决统计，不伪造成成功或失败。
+
+## PostgreSQL 事务通知与 Redis 发布（2026-11-04）
+
+`0005_realtime` 新增资源版本、通知 Outbox 和事件接收游标表。控制端 Session 在事务提交前
+汇总实际变化，为实验、批次、Attempt、观测运行、目录和运维视图更新版本，同时写入
+Outbox；提交失败时业务数据、版本和通知一起回滚。版本锁按稳定顺序获取，网络请求不在
+事务内执行。事件游标单独存储，不修改不可变原始事件。
+
+每个资源只保留一条待发布通知，多次变化合并为最新版本；原始事件仍全部保存在 PostgreSQL。
+`eyes-publisher` 用短事务领取通知，事务外发布 Redis Pub/Sub，再按领取 token 和版本确认。
+发布期间若资源再次变化，确认不会删除新版本。中断可能导致重复通知；Redis 没有订阅者时
+也可完成 publish，因此“发布成功”不等于所有页面已收到。发布失败保留原记录并有界退避。
+
+```sh
+uv run alembic upgrade head
+# 设置 EYES_REDIS_URL 后，在独立进程启动：
+uv run eyes-publisher
+```
+
+Compose 已加入 Redis 7.4.9 和 publisher；Redis 不暴露宿主机端口，配置 256 MiB 内存上限
+与 allkeys-lru。发布进程默认各最多两条 PostgreSQL/Redis 连接。Redis 只承载可重建通知和查询缓存，
+不是任务、租约、额度或证据的权威来源。`/v1/operations.notifications` 提供待发布资源数、
+最早积压时间和最大重试次数；这些值按当前项目过滤。
+
+`GET /v1/realtime/{kind}/{resource_id}/events?after=0&limit=200` 提供接收顺序分页，kind 为
+attempt 或 observed_run。调用者必须具有该项目的读取权限。响应包括 receive_version、
+next_cursor、has_more 和资源版本；客户端补查使用 next_cursor，展示顺序仍可使用生产者
+sequence。晚到的小 sequence 不会被接收游标跳过。历史事件在迁移时按存储顺序分配游标。
+响应同时带有恢复代次 `epoch`；后续请求携带该值，数据库恢复后的代次变化会返回
+`reset=true` 并从头读取。客户端此时替换旧事件列表，避免旧游标跳过恢复后的记录。
+被动观测详情页已改为每次最多补查 200 条，并按 Agent 序号展示；“加载后续事件”继续补查，
+通知与定期刷新复用已读取的游标。执行详情页也使用接收游标累积读取，并保留每页 50 条的展示；
+跳转到尚未读取的页时按需补查，评分引用定位使用相同接收顺序。恢复后的 epoch 变化会清空
+原游标前缀，避免把旧时间线事件混入恢复后的记录。
+
+本轮已在独立 PostgreSQL 上从 0004 升级至 0005，并通过真实目标版本发布操作观察到
+两条 Outbox 记录；`eyes-publisher --once` 发布后，Redis 订阅端收到 catalog/operations
+版本通知，Outbox 归零。此证据只覆盖通知正常路径。随后升级至 0006，API 就绪与 SSE 认证/连接检查通过；
+该阶段开发库没有实验数据；后续已验证排队实验的缓存命中、版本失效及 Redis 降级，见
+[本轮实现对照](implementation-status.md)。并发一致性未完成运行验收。Redis 断开/恢复的检查见下文；
+通知遗漏后的事件补齐和桌面浏览器验收仍待完成，不能据此声称实时产品链路已完成验收。
+
+`GET /v1/realtime/stream` 通过 Bearer 认证建立 SSE。每个 API 进程使用一条 Redis 订阅连接，
+限制 128 个客户端及每客户端 64 条待发通知；队列溢出要求重新查询。默认每 30 秒重新
+验证凭据并要求补查，Redis 断开/重连也触发补查。前端合并 500 ms 内的查询失效通知，
+每 30 秒保底刷新活动查询；已移除各页面原有的 2～15 秒重复轮询。令牌不进入 URL。
+
+实验 `/results` 使用项目、数据库时间线、实验 ID 和资源版本组成的缓存键。
+响应的 `computed_at` 记录实际计算统计的时间，缓存命中保留该时间，控制台显示统计更新时间。
+每次查询先用短事务确认权限与版本，Redis I/O 不占用 PostgreSQL 事务。未命中时在
+REPEATABLE READ 快照内读取版本和汇总，防止把旧结果写入新版本。缓存默认保留 60 秒，
+每进程最多 4 个并发汇总计算，超出返回 `503 summary_busy`；Redis 连接失败后暂停
+访问 5 秒，继续使用同一计算上限。可通过 `EYES_CACHE_TTL_SECONDS` 和
+`EYES_CACHE_QUERY_CONCURRENCY` 调整。`0006_cache_epoch` 增加时间线标识，
+`eyes-ops restore` 恢复后更换标识，避免旧 Redis 键与恢复后的版本号冲突。
+手工恢复数据库时，应在开放 API 前清空专用 Redis 缓存或更新 `cache_epoch.epoch`。
+
+`GET /v1/operations` 的 `summary_cache` 提供当前 API 进程自 `since` 起的诊断计数：
+`hits`/`misses` 是成功读取 Redis 后的命中/未命中；`bypasses` 是未配置 Redis 或处于
+故障冷却期时跳过查询的次数；`cache_errors` 包括读取、解析及写入失败。
+`database_reads` 记录获准开始的汇总计算次数（包含后续失败），`active_reads` 是当前占用的
+计算槽位，`busy_rejections` 是因槽位耗尽拒绝的请求数。`hit_ratio` 仅以成功查询次数为分母，
+尚无成功查询时返回 null。还提供计算并发上限和剩余冷却秒数。这些是进程级基础设施计数，
+不含项目内容或凭据；进程重启后重置，多 API 部署时不能把单次响应当作全服务统计。
+开发库上已确认该接口返回 200 和初始诊断结构；缓存命中与故障计数仍需有实验数据时验证。
+
+实时链路的本地故障检查（2026-11-05）：在独立 PostgreSQL/Redis 环境建立真实 SSE 连接，
+停止 Redis 后收到一次 `redis_unavailable`，之后只收到周期 `polling` 补查；恢复 Redis 后
+收到 `redis_connected` 并回到 `live`。检查将补查周期设为 5 秒以便观察，部署默认仍为
+30 秒。修复了重连失败每 2 秒重复通知、导致数据库刷新过频的问题。连接保持期间查询
+`pg_stat_activity`，除查询本身外只有 idle 连接，没有 idle in transaction。
+此检查覆盖 Redis 断开/恢复通知，不证明浏览器渲染、事件乱序或全链路吞吐。
+
+### 进程内耗时诊断
+
+`/v1/operations.runtime_metrics` 给出当前 API 进程的累计次数、失败次数，以及每项最近
+最多 512 个样本的均值、P95 和最大值。无样本返回 null；P95 使用最近窗口的 nearest-rank，
+不是全历史分位数，也不能视作负载测试结论。进程重启会重置，多个 API 进程不自动汇总。
+
+- `database_checkout`：从连接池获取连接的总耗时，包含排队、必要的新建连接与 pre-ping，
+  **不是纯排队时间**；失败计数包括获取超时或连接失败。
+- `scheduling_lock`：已获取数据库连接后执行两个调度 advisory-lock SQL 的总耗时，
+  包含锁等待及 SQL 往返，不包括之后持锁处理业务的时间。
+- `http_response_headers`：进入请求边界至发送响应头，包含请求体接收；HTTP 4xx/5xx 计为失败。
+  SSE 只计握手，不把长连接持续时间混入。没有发出响应头的断开或未处理异常不在此窗口中。
+- `claim_response_headers`：相同响应头边界下的工作领取请求子集。
+
+本地已确认服务启动、健康检查和运维接口返回实际的连接获取及响应头样本；空的领取/锁窗口
+保持 null。未据此发布任何并发容量或性能提升数字。
+
+独立证据保留期已接入：`EYES_EVENT_RETENTION_DAYS`、`EYES_ARTIFACT_RETENTION_DAYS`
+分别控制事件正文和 ready 产物，默认 0，不改变原整体过期配置。维护预览新增 `events` 和
+`artifacts` ID 列表；仍保护排队/活动/未知工作及等待评分的执行。部分清理生成新的 partial
+清单，旧清单保持原摘要；引用已过期内容的旧评分重试返回 410，新评分按剩余证据判定。
+使用新配置在独立开发库运行维护预览和 audit 均通过；库中无执行证据，本轮没有实施正文
+删除或文件回收，不能据此宣称重新评分与部分清理已通过运行验收。

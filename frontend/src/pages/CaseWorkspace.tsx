@@ -35,6 +35,14 @@ import { EventExplorer } from "../components/EventExplorer";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
 import type { Attempt, CaseRun, Event, Experiment, Manifest } from "../types";
 
+type ReceivedAttemptEvents = {
+  items: Event[];
+  next_cursor: number;
+  epoch: string;
+  reset: boolean;
+  has_more: boolean;
+};
+
 function pageNumber(value: string | null) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= 0 ? number : 0;
@@ -54,7 +62,6 @@ function CaseWorkspace({ id, runId }: { id: string; runId: string }) {
     queryFn: ({ signal }) =>
       api!.request<Experiment>(`/v1/experiments/${id}`, { signal }),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const runs = useQuery({
     queryKey: ["case-runs", id, page],
@@ -64,7 +71,6 @@ function CaseWorkspace({ id, runId }: { id: string; runId: string }) {
         { signal },
       ),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const selectedRun = useQuery({
     queryKey: ["case-run", id, runId],
@@ -73,7 +79,6 @@ function CaseWorkspace({ id, runId }: { id: string; runId: string }) {
         signal,
       }),
     enabled: !!api,
-    refetchInterval: 10000,
   });
   const run = selectedRun.data;
   const experimentSearch =
@@ -226,18 +231,47 @@ function AttemptReview({
     queryFn: ({ signal }) =>
       api!.request<Attempt>(`/v1/attempts/${attemptId}`, { signal }),
     enabled: !!api && !!attemptId,
-    refetchInterval: 10000,
   });
   const events = useQuery({
-    queryKey: ["events", attemptId, eventPage],
-    queryFn: ({ signal }) =>
-      api!.request<{ items: Event[] }>(
-        `/v1/attempts/${attemptId}/events?limit=51&offset=${eventPage * 50}`,
+    queryKey: ["events", attemptId],
+    queryFn: async ({ signal }) => {
+      const previous = client.getQueryData<ReceivedAttemptEvents>([
+        "events",
+        attemptId,
+      ]);
+      const received = await api!.request<ReceivedAttemptEvents>(
+        `/v1/realtime/attempt/${attemptId}/events?after=${previous?.next_cursor ?? 0}&limit=200${previous ? `&epoch=${previous.epoch}` : ""}`,
         { signal },
-      ),
+      );
+      return {
+        ...received,
+        items: [
+          ...(received.reset ? [] : (previous?.items ?? [])),
+          ...received.items,
+        ],
+      };
+    },
     enabled: !!api && !!attemptId && tab === "events",
-    refetchInterval: 10000,
   });
+  const {
+    data: receivedEvents,
+    isFetching: fetchingEvents,
+    isError: eventError,
+    refetch: fetchEvents,
+  } = events;
+  useEffect(() => {
+    // A bookmarked page can be beyond the received prefix. Fetch only until
+    // that page exists; failed reads wait for the explicit retry action.
+    if (
+      tab === "events" &&
+      receivedEvents?.has_more &&
+      receivedEvents.items.length <= eventPage * 50 &&
+      !fetchingEvents &&
+      !eventError
+    ) {
+      void fetchEvents();
+    }
+  }, [tab, receivedEvents, eventPage, fetchingEvents, eventError, fetchEvents]);
   const manifests = useQuery({
     queryKey: ["manifests", attemptId, manifestPage],
     queryFn: ({ signal }) =>
@@ -246,7 +280,6 @@ function AttemptReview({
         { signal },
       ),
     enabled: !!api && !!attemptId && tab === "evidence",
-    refetchInterval: 10000,
   });
   const inline = run.attempts.find((a) => a.id === attemptId);
   const selectedScore = params.get("score");
@@ -305,11 +338,15 @@ function AttemptReview({
           controller.signal,
           AbortSignal.timeout(15000),
         ]);
-        for (let offset = 0; ; offset += 200) {
-          const batch = await api.request<{ items: Event[] }>(
-            `/v1/attempts/${attemptId}/events?limit=200&offset=${offset}`,
+        let cursor = 0,
+          offset = 0,
+          epoch: string | undefined;
+        for (;;) {
+          const batch = await api.request<ReceivedAttemptEvents>(
+            `/v1/realtime/attempt/${attemptId}/events?limit=200&after=${cursor}${epoch ? `&epoch=${epoch}` : ""}`,
             { signal },
           );
+          if (batch.reset) offset = 0;
           const index = batch.items.findIndex((item) => item.id === value);
           if (index >= 0) {
             update({
@@ -319,8 +356,11 @@ function AttemptReview({
             });
             return;
           }
-          if (batch.items.length < 200)
+          if (!batch.has_more)
             throw new Error("引用事件当前不可读取，请检查证据保留状态。");
+          offset += batch.items.length;
+          cursor = batch.next_cursor;
+          epoch = batch.epoch;
         }
       } else if (kind === "manifest" && value) {
         const index =
@@ -481,7 +521,10 @@ function AttemptReview({
               title="暂无执行事件"
               description="目标尚未开始执行。"
             />
-          ) : events.isPending ? (
+          ) : events.isPending ||
+            (!events.error &&
+              events.data?.has_more &&
+              events.data.items.length <= eventPage * 50) ? (
             <Loading />
           ) : events.error ? (
             <ErrorNotice
@@ -503,13 +546,19 @@ function AttemptReview({
               </div>
               <EventExplorer
                 key={attemptId}
-                events={events.data.items.slice(0, 50)}
+                events={events.data.items.slice(
+                  eventPage * 50,
+                  (eventPage + 1) * 50,
+                )}
                 selectedId={params.get("event") || ""}
                 onSelect={(value) => update({ event: value })}
               />
               <Pagination
                 page={eventPage}
-                next={events.data.items.length > 50}
+                next={
+                  events.data.items.length > (eventPage + 1) * 50 ||
+                  events.data.has_more
+                }
                 onPage={setEventPage}
               />
             </div>
