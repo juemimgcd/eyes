@@ -28,6 +28,10 @@
 
 ## 运维
 
+最终结果队列只运行一个 `result-consumer` 实例，以单线程逐条处理；不要对该服务
+使用 `--scale result-consumer=2` 或额外启动连接同一队列的消费者。永久拒绝转死信后
+继续消费，数据库等临时故障保留重投，具体边界见 [结果队列说明](result-queue.md#串行消费约定)。
+
 ```sh
 ssh tencent
 cd /opt/eyes/current
