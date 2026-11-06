@@ -247,12 +247,12 @@ export function Disconnected() {
   return (
     <Empty
       icon={Plug}
-      title="连接项目"
-      description="输入项目令牌，查看实验和执行记录。"
+      title="登录账号"
+      description="登录个人账号，查看自己的实验和执行记录。"
       action={
         <Button onClick={openConnection}>
           <Plug data-icon="inline-start" />
-          连接项目
+          登录账号
         </Button>
       }
     />

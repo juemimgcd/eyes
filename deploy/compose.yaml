@@ -7,6 +7,8 @@ x-control: &control
     dockerfile: deploy/Dockerfile
   environment: &environment
     EYES_DATABASE_URL: postgresql+psycopg://eyes:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/eyes
+    EYES_SESSION_COOKIE_SECURE: ${EYES_SESSION_COOKIE_SECURE:-false}
+    EYES_SESSION_HOURS: ${EYES_SESSION_HOURS:-168}
     EYES_ARTIFACT_ROOT: /app/data/artifacts
     EYES_DATABASE_POOL_SIZE: ${EYES_DATABASE_POOL_SIZE:-8}
     EYES_DATABASE_MAX_OVERFLOW: ${EYES_DATABASE_MAX_OVERFLOW:-0}

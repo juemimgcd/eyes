@@ -17,7 +17,7 @@ export class ConsoleBoundary extends Component<
         <AlertCircle size={32} />
         <h1>页面暂时无法显示</h1>
         <p className="muted">
-          刷新后重新连接项目；如果持续出现，请检查 API 响应与浏览器控制台。
+          刷新后恢复登录状态；如果持续出现，请检查 API 响应与浏览器控制台。
         </p>
         <button
           className="button primary"

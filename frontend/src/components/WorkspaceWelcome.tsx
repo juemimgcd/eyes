@@ -14,19 +14,19 @@ import {
 export function WorkspaceWelcome() {
   const { openConnection } = useConnection();
   return (
-    <section className="connection-empty" aria-label="项目未连接">
+    <section className="connection-empty" aria-label="账号未登录">
       <Empty className="min-h-[min(440px,60dvh)]">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <Plug />
           </EmptyMedia>
-          <EmptyTitle>连接项目</EmptyTitle>
+          <EmptyTitle>登录账号</EmptyTitle>
           <EmptyDescription>
-            输入项目令牌，查看实验和执行记录。
+            登录个人账号，查看自己的实验和执行记录。
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
-          <Button onClick={openConnection}>连接项目</Button>
+          <Button onClick={openConnection}>登录账号</Button>
           <Button
             variant="link"
             nativeButton={false}

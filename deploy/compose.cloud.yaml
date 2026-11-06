@@ -9,6 +9,8 @@ services:
     <<: *image
   api:
     <<: *image
+    environment:
+      EYES_SESSION_COOKIE_SECURE: "true"
     ports: !reset []
     command: [uvicorn, eyes.server.api.app:create_app, --factory, --host, 0.0.0.0, --port, "8000", --root-path, /eyes/api]
   scheduler:

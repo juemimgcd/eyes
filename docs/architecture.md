@@ -14,6 +14,10 @@ HTTP Agent 和 Python 适配器两种通用接入与宿主机 Runner 已有代�
 
 新增用户确认的本地 Agent 被动观测路径：用户在 Agent 中发起任务，Agent exporter 直接向 observation API 上报；以 ObservationSource → ObservedRun → ObservedEvent 保存来源、会话与任务内序列。该路径不创建 Experiment/Attempt，也不经过调度或评分。来源写入令牌与项目读取/管理令牌分离。采集、状态与恢复边界见 [被动观测说明](observation.md)。
 
+## 个人账号补充（2026-11-06）
+
+新增 Account → Project 一对一归属。注册在同一事务内创建账号和个人项目；浏览器会话复用项目权限，包含账号归属、过期时间及撤销状态。数据列表、详情、写入、产物与实时通知继续由服务端 project_id 限定。历史共享项目不迁入新账号，升级撤销原共享读取及管理令牌。CLI、Runner 和观测来源保留各自的项目范围凭据。具体接口与部署要求见 [个人账号](accounts.md)。
+
 ## 运行结构
 
 采用模块化后端、独立调度进程和独立 Runner，共享一套协议定义。API 和调度进程由同一后端代码包提供，领域规则只保留一份实现。

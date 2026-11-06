@@ -9,6 +9,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExport
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from eyes.server.accounts.routes import router as accounts_router
 from eyes.server.api.dependencies import Database
 from eyes.server.api.middleware import RequestBoundary, validation_details
 from eyes.server.api.routes import router
@@ -57,6 +58,7 @@ def create_app(settings: Settings | None = None):
     app.state.result_publisher = Publisher(settings, settings.result_queue, reliable=True)
     app.state.artifacts = LocalArtifactStore(settings.artifact_root)
     app.add_middleware(RequestBoundary, settings=settings, tracer=tracer)
+    app.include_router(accounts_router)
     app.include_router(router)
     app.include_router(event_queue_router)
     app.include_router(result_queue_router)

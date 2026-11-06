@@ -1,14 +1,7 @@
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Search, Plug, Unplug, X } from "lucide-react";
+import { ChevronDown, Search, UserRound, LogOut, X } from "lucide-react";
 import {
   NavLink,
   Navigate,
@@ -17,17 +10,12 @@ import {
   useLocation,
 } from "react-router-dom";
 import { Api } from "./api";
+import { AccountGate } from "./components/AccountGate";
+import type { Account } from "./components/AccountGate";
 import { ConnectionContext } from "./connection";
 import { useRealtime } from "./hooks/use-realtime";
 import { navigation, navigationGroups } from "./navigation";
 import { Dialog, ErrorNotice, Eye, Loading } from "./components/ui";
-import {
-  Field,
-  FieldGroup,
-  FieldLabel,
-  FieldDescription,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Breadcrumb,
@@ -107,14 +95,35 @@ const QuickNavigation = lazy(() =>
 );
 
 export default function App() {
-  const [api, setApi] = useState<Api | null>(null);
+  return (
+    <AccountGate>
+      {(api, account, onLogout) => (
+        <Workspace
+          key={account.id}
+          api={api}
+          account={account}
+          onLogout={onLogout}
+        />
+      )}
+    </AccountGate>
+  );
+}
+
+function Workspace({
+  api,
+  account,
+  onLogout,
+}: {
+  api: Api;
+  account: Account;
+  onLogout: () => Promise<void>;
+}) {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const queryClient = useQueryClient();
   const expireConnection = useCallback(() => {
     queryClient.clear();
-    setApi(null);
-    setConnectionOpen(true);
+    window.dispatchEvent(new Event("eyes-session-expired"));
   }, [queryClient]);
   const realtime = useRealtime(api, expireConnection);
   const location = useLocation();
@@ -127,11 +136,6 @@ export default function App() {
   useEffect(() => {
     document.title = `${pageName} · Eyes`;
   }, [pageName]);
-  function connect(client: Api | null) {
-    queryClient.clear();
-    setApi(client);
-    setConnectionOpen(false);
-  }
   const openConnection = () => setConnectionOpen(true);
   return (
     <ConnectionContext.Provider value={{ api, openConnection }}>
@@ -149,6 +153,7 @@ export default function App() {
         >
           <WorkspaceShell
             api={api}
+            account={account}
             realtime={realtime}
             pageName={pageName}
             openConnection={openConnection}
@@ -210,10 +215,10 @@ export default function App() {
           </Suspense>
         )}
         {connectionOpen && (
-          <ConnectionDialog
-            current={api}
+          <AccountDialog
+            account={account}
             onClose={() => setConnectionOpen(false)}
-            onConnect={connect}
+            onLogout={onLogout}
           />
         )}
       </TooltipProvider>
@@ -223,6 +228,7 @@ export default function App() {
 
 function WorkspaceShell({
   api,
+  account,
   realtime,
   pageName,
   openConnection,
@@ -231,6 +237,7 @@ function WorkspaceShell({
   children,
 }: {
   api: Api | null;
+  account: Account;
   realtime: "offline" | "connecting" | "live" | "polling";
   pageName: string;
   openConnection: () => void;
@@ -296,13 +303,13 @@ function WorkspaceShell({
               <SidebarMenuButton
                 size="lg"
                 variant="outline"
-                tooltip="项目连接"
+                tooltip="个人账号"
                 onClick={connect}
-                aria-label="项目连接"
+                aria-label="个人账号"
               >
-                <Plug />
+                <UserRound />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span>项目连接</span>
+                  <span>{account.username}</span>
                   <span className="console-project-note">
                     {
                       {
@@ -396,11 +403,11 @@ function WorkspaceShell({
             <Button
               variant="outline"
               onClick={openConnection}
-              aria-label="连接设置"
+              aria-label="账号设置"
             >
-              <Plug data-icon="inline-start" />
-              <span className="hidden sm:inline">连接设置</span>
-              <span className="sm:hidden">连接</span>
+              <UserRound data-icon="inline-start" />
+              <span className="hidden sm:inline">账号设置</span>
+              <span className="sm:hidden">账号</span>
             </Button>
           </div>
         </header>
@@ -415,98 +422,47 @@ function WorkspaceShell({
     </>
   );
 }
-function ConnectionDialog({
-  current,
+function AccountDialog({
+  account,
   onClose,
-  onConnect,
+  onLogout,
 }: {
-  current: Api | null;
+  account: Account;
   onClose: () => void;
-  onConnect: (client: Api | null) => void;
+  onLogout: () => Promise<void>;
 }) {
-  const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const pending = useRef<AbortController | null>(null);
-  useEffect(() => () => pending.current?.abort(), []);
-  async function submit(e: React.SubmitEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function logout() {
     setBusy(true);
     setError(null);
-    const client = new Api(token.trim());
-    const controller = new AbortController();
-    pending.current?.abort();
-    pending.current = controller;
     try {
-      await client.request("/v1/operations", {
-        signal: AbortSignal.any([
-          controller.signal,
-          AbortSignal.timeout(15000),
-        ]),
-      });
-      if (controller.signal.aborted) return;
-      onConnect(client);
-    } catch (e) {
-      if (!controller.signal.aborted) setError(e);
+      await onLogout();
+    } catch (failure) {
+      setError(failure);
     } finally {
       setBusy(false);
     }
   }
   return (
     <Dialog
-      title="连接项目"
-      subtitle="验证项目令牌后加载观测与实验数据。"
+      title="个人账号"
+      subtitle={`${account.username} 的工作空间`}
       onClose={onClose}
     >
-      <form onSubmit={submit} className="form">
-        <FieldGroup>
-          <Field data-disabled={busy} data-invalid={error != null}>
-            <FieldLabel htmlFor="project-token">项目令牌</FieldLabel>
-            <Input
-              id="project-token"
-              data-autofocus
-              type="password"
-              disabled={busy}
-              required
-              autoComplete="off"
-              aria-invalid={error != null}
-              placeholder="输入 Bearer 令牌"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-            />
-            <FieldDescription>
-              支持 read 与 manage 令牌。刷新页面后需重新连接。
-            </FieldDescription>
-          </Field>
-        </FieldGroup>
-        <details className="connection-help">
-          <summary>如何获取项目令牌？</summary>
-          <p>
-            先启动 PostgreSQL、迁移和 API，再用{" "}
-            <code>eyes-admin bootstrap</code> 获取令牌。开发代理默认连接{" "}
-            <code>127.0.0.1:8000</code>。
-          </p>
-        </details>
+      <div className="form">
+        <p>你的 Agent、测试集、实验和观测记录保存在此账号下。</p>
         {error != null && <ErrorNotice error={error} />}
         <div className="form-actions">
-          {current && (
-            <Button
-              variant="destructive"
-              type="button"
-              onClick={() => onConnect(null)}
-            >
-              <Unplug data-icon="inline-start" />
-              断开连接
-            </Button>
-          )}
-          <Button type="button" variant="outline" onClick={onClose}>
-            取消
+          <Button variant="outline" onClick={onClose} disabled={busy}>
+            返回工作空间
           </Button>
-          <Button type="submit" disabled={busy || !token.trim()}>
-            {busy ? "正在验证…" : "连接项目"}
+          <Button onClick={logout} disabled={busy}>
+            <LogOut />
+            {busy ? "正在退出…" : "退出登录"}
           </Button>
         </div>
-      </form>
+      </div>
     </Dialog>
   );
 }

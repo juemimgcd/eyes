@@ -15,7 +15,7 @@ export function QuickNavigation({
   return (
     <Dialog
       title="快速导航"
-      subtitle="查找页面，或打开连接设置。"
+      subtitle="查找页面，或打开账号设置。"
       onClose={onClose}
     >
       <Command className="quick-navigation" label="快速导航" loop>
@@ -60,8 +60,8 @@ export function QuickNavigation({
                 >
                   <Plug size={18} aria-hidden="true" />
                   <span>
-                    <strong>连接设置</strong>
-                    <small>使用项目令牌连接实验空间</small>
+                    <strong>账号设置</strong>
+                    <small>查看当前账号或退出登录</small>
                   </span>
                   <ArrowUpRight size={15} aria-hidden="true" />
                 </Command.Item>

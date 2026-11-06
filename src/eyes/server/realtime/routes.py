@@ -20,6 +20,7 @@ from eyes.server.storage.models import (
     ObservedEvent,
     ObservedRun,
     ResourceRevision,
+    now,
 )
 
 router = APIRouter(prefix="/v1/realtime", tags=["realtime"])
@@ -38,6 +39,7 @@ async def updates(request: Request, user: Reader):
             return bool(
                 credential
                 and not credential.revoked
+                and (credential.expires_at is None or credential.expires_at > now())
                 and credential.role in {"read", "manage"}
                 and credential.project_id == project_id
                 and credential.token_digest == token_digest
