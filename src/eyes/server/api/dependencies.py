@@ -9,8 +9,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import Session
 
+from eyes.server.accounts.security import COOKIE_NAME, browser_write
 from eyes.server.domain import DomainError
-from eyes.server.storage.models import Credential
+from eyes.server.storage.models import Credential, now
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -44,18 +45,30 @@ Database = Annotated[Session, Depends(db_session, scope="function")]
 
 
 def identity(
-    session: Database, supplied: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+    session: Database,
+    supplied: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    request: Request,
 ):
-    if supplied is None:
-        raise DomainError(401, "authentication_required", "Bearer token required")
-    token_digest = hashlib.sha256(supplied.credentials.encode()).hexdigest()
+    token = supplied.credentials if supplied else request.cookies.get(COOKIE_NAME)
+    if not token:
+        raise DomainError(401, "authentication_required", "请登录后继续。")
+    if supplied is None and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        browser_write(request)
+    token_digest = hashlib.sha256(token.encode()).hexdigest()
     credential = session.scalar(
         select(Credential).where(
             Credential.token_digest == token_digest, Credential.revoked.is_(False)
         )
     )
-    if credential is None:
+    if (
+        credential is None
+        or (credential.expires_at is not None and credential.expires_at <= now())
+        or (supplied is None and credential.account_id is None)
+    ):
         raise DomainError(401, "invalid_token", "token is invalid or revoked")
+    expected_account = request.headers.get("x-eyes-account")
+    if expected_account and expected_account != str(credential.account_id):
+        raise DomainError(401, "account_changed", "账号已切换，请重新登录。")
     return credential
 
 
@@ -78,7 +91,7 @@ ArtifactReader = Annotated[Credential, Depends(roles("read", "manage", "runner")
 
 def short_identity(request, supplied, allowed):
     with transaction(request) as session:
-        credential = identity(session, supplied)
+        credential = identity(session, supplied, request)
         if credential.role not in allowed:
             raise DomainError(
                 403, "permission_denied", "credential does not authorize this operation"

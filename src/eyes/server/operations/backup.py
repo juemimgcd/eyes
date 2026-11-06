@@ -227,7 +227,9 @@ def restore(sessions, settings, source, *, container=None, bin_dir=None):
             # Restored leases must not authenticate old Runner processes. Preserve
             # unknown execution reservations; require operators to reconcile them.
             for credential in session.scalars(
-                select(Credential).where(Credential.role == "runner")
+                select(Credential).where(
+                    (Credential.role == "runner") | Credential.account_id.is_not(None)
+                )
             ):
                 credential.revoked = True
             for work in session.scalars(select(WorkItem).where(WorkItem.status == "claimed")):

@@ -4,13 +4,13 @@
 
 ## 启动与接入
 
-本机使用时，完成数据库迁移和项目初始化后运行 `uv run eyes-server`，在 Deta 中运行 `uv run --env-file .env deta -i`。Deta 默认连接 `http://127.0.0.1:8000`，不需要创建来源或填写令牌；首次事件自动登记本机来源。同一工作目录的来源标识保存在 `.deta/eyes/<配置摘要>/source-id`，只用于归组，不是认证凭据。
+运行数据库迁移与 `uv run eyes-server` 后，在 Web 注册并登录个人账号，创建观测来源，再把来源令牌配置到 Agent。新的观测数据归属于创建来源的账号项目；Deta 的 URL、令牌和正文采集配置见下文及接入面板。
 
-本地 API 若使用其他端口，只需在 Deta `.env` 设置 `EYES_OBSERVATION_URL=http://127.0.0.1:8001`。完整正文采集仍需 `EYES_CAPTURE_BODY=true`；设置 `EYES_OBSERVATION_ENABLED=false` 关闭采集。Web 的项目连接权限保持原有认证。
+本地 API 若使用其他端口，在 Deta `.env` 设置 `EYES_OBSERVATION_URL=http://127.0.0.1:8001`。完整正文采集仍需 `EYES_CAPTURE_BODY=true`；设置 `EYES_OBSERVATION_ENABLED=false` 关闭采集。
 
-`eyes-server` 固定监听回环地址并默认开启本地观测，显式 `EYES_LOCAL_OBSERVATION=false` 可关闭。通用 ASGI factory 默认关闭本地入口；本机自定义 uvicorn 启动时需显式开启，并使用回环监听与 `--no-proxy-headers`。不要在反向代理后开启本地入口。接口校验直连 peer、Host，拒绝 Origin 和转发头。远程部署不会因为使用通用 factory 自动开放免令牌入口。
+`eyes-server` 与通用 ASGI factory 均默认关闭免令牌本地观测。只有明确需要旧单用户直连模式时才设置 `EYES_LOCAL_OBSERVATION=true`，使用回环监听与 `--no-proxy-headers`，不得在反向代理后开启。接口校验直连 peer、Host，拒绝 Origin 和转发头。
 
-服务器只有一个项目时自动归入它；多个项目需由服务端设置 `EYES_LOCAL_OBSERVATION_PROJECT_ID`，不会猜测目标项目。本次本机环境已设置。任意本机进程可写入本地观测，因此它适合单用户开发环境。远程或多人共享环境使用下面的令牌接入。
+服务器只有一个项目时自动归入它；多个项目需由服务端设置 `EYES_LOCAL_OBSERVATION_PROJECT_ID`，不会猜测目标项目。任意本机进程可写入本地观测，因此它适合单用户开发环境。远程或多人共享环境使用下面的令牌接入。
 
 远程接入：在 **Agent 观测 → 接入 Agent → 远程 Agent 接入** 创建来源，将返回的 `EYES_OBSERVATION_URL`、`EYES_OBSERVATION_TOKEN` 配入 Deta。提供令牌时继续使用认证上报；无令牌时 Deta 只允许回环地址。远程来源令牌只显示一次，仅允许上报，不能读取或管理项目。
 

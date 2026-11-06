@@ -23,6 +23,13 @@ class RequestBoundary:
 
         async def measured_send(message):
             if message["type"] == "http.response.start":
+                # Personal responses must not survive logout in browser/proxy caches.
+                if scope["path"].startswith("/v1/"):
+                    message["headers"] = [
+                        (key, value)
+                        for key, value in message["headers"]
+                        if key.lower() != b"cache-control"
+                    ] + [(b"cache-control", b"no-store, no-transform")]
                 elapsed = perf_counter() - started
                 failed = message["status"] >= 400
                 runtime_metrics.observe("http_response_headers", elapsed, failed=failed)

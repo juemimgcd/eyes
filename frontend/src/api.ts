@@ -10,7 +10,17 @@ export class ApiError extends Error {
   }
 }
 export class Api {
-  constructor(readonly token: string) {}
+  constructor(
+    readonly token: string = "",
+    readonly accountId?: string,
+  ) {}
+  get headers(): Record<string, string> {
+    return {
+      "X-Eyes-Client": "console",
+      ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      ...(this.accountId ? { "X-Eyes-Account": this.accountId } : {}),
+    };
+  }
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     let response: Response;
     try {
@@ -21,7 +31,7 @@ export class Api {
           AbortSignal.timeout(30000),
         ]),
         headers: {
-          Authorization: `Bearer ${this.token}`,
+          ...this.headers,
           ...(options.body ? { "Content-Type": "application/json" } : {}),
           ...options.headers,
         },
@@ -37,17 +47,21 @@ export class Api {
       throw new ApiError(0, "无法连接控制 API，请检查后端服务和代理配置。");
     }
     if (!response.ok) {
+      if (response.status === 401 && this.accountId)
+        window.dispatchEvent(new Event("eyes-session-expired"));
       const body = await response.json().catch(() => null);
       const messages: Record<number, string> = {
-        401: "令牌无效或已撤销，请重新连接。",
-        403: "当前令牌没有此操作的权限，请使用管理令牌。",
+        401: "登录已过期，请重新登录。",
+        403: "当前账号没有此操作的权限。",
         404: "记录不存在或不属于当前项目。",
         410: "内容已按保留策略过期，无法继续读取。",
         503: "后端尚未就绪，请检查 PostgreSQL 和数据库迁移。",
       };
       throw new ApiError(
         response.status,
-        messages[response.status] ||
+        (path.startsWith("/v1/auth/")
+          ? body?.error?.message
+          : messages[response.status]) ||
           body?.error?.message ||
           `请求失败（${response.status}）`,
         body?.error?.details,
@@ -89,10 +103,13 @@ export class Api {
     }
   }
   async download(id: string) {
-    const response = await fetch(`${import.meta.env.BASE_URL}api/v1/artifacts/${id}/content`, {
-      headers: { Authorization: `Bearer ${this.token}` },
-      signal: AbortSignal.timeout(60000),
-    });
+    const response = await fetch(
+      `${import.meta.env.BASE_URL}api/v1/artifacts/${id}/content`,
+      {
+        headers: this.headers,
+        signal: AbortSignal.timeout(60000),
+      },
+    );
     if (!response.ok)
       throw new ApiError(
         response.status,

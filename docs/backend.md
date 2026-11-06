@@ -199,7 +199,7 @@ API 使用 OTel SDK 创建实际 HTTP 请求 span，接收 W3C Trace Context，�
 
 ## 迁移、备份与后续验收
 
-迁移入口是 `alembic.ini` 和 `migrations/versions/`，当前 head 为 `0011_agent_pairings`。迁移只在显式命令/Compose migrate 服务中运行，API 启动不自动建表。升级前备份数据库和证据卷，并记录应用版本与迁移版本。恢复时需要检查每个 ready 产物的路径、大小和摘要，以及评分引用的清单。`eyes-ops backup/restore/audit` 提供可执行流程，命令和验证边界见 [平台说明](platform.md)。
+迁移入口是 `alembic.ini` 和 `migrations/versions/`，当前 head 为 `0012_personal_accounts`（[个人账号与升级说明](accounts.md)）。迁移只在显式命令/Compose migrate 服务中运行，API 启动不自动建表。升级前备份数据库和证据卷，并记录应用版本与迁移版本。恢复时需要检查每个 ready 产物的路径、大小和摘要，以及评分引用的清单。`eyes-ops backup/restore/audit` 提供可执行流程，命令和验证边界见 [平台说明](platform.md)。
 
 已提供 `eyes-server`、`eyes-scheduler`、`eyes-admin`、`eyes-runner`、开发者 CLI `eyes` 和运维 CLI `eyes-ops`。新增回归、封存和评分重试端点见 [平台说明](platform.md)。
 

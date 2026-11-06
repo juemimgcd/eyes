@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     realtime_queue_size: int = Field(default=64, ge=1, le=1000)
     realtime_resync_seconds: float = Field(default=30, ge=5, le=60)
     realtime_reauth_seconds: float = Field(default=30, ge=5, le=60)
+    session_hours: int = Field(default=168, ge=1, le=720)
+    session_cookie_secure: bool = False
     artifact_root: Path = Path("data/artifacts")
     max_request_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
     max_score_input_bytes: int = Field(default=32 * 1024 * 1024, ge=4096, le=128 * 1024 * 1024)

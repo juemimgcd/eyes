@@ -34,14 +34,13 @@ export function GuidePage() {
                 启动控制后端
               </h2>
               <p>
-                配置实际 PostgreSQL 连接，执行迁移并创建项目。API 默认监听
+                配置实际 PostgreSQL 连接，执行数据库迁移。API 默认监听
                 127.0.0.1:8000，调度进程需要独立运行。
               </p>
               <pre>
                 uv sync --frozen{"\n"}cp .env.example .env{"\n"}# 编辑
                 EYES_DATABASE_URL 后执行{"\n"}uv run alembic upgrade head{"\n"}
-                uv run eyes-admin bootstrap --name default{"\n"}uv run
-                eyes-server{"\n"}# 另一个终端{"\n"}uv run eyes-scheduler
+                uv run eyes-server{"\n"}# 另一个终端{"\n"}uv run eyes-scheduler
               </pre>
             </div>
           </section>
@@ -50,12 +49,11 @@ export function GuidePage() {
             <div>
               <h2>
                 <KeyRound size={19} />
-                连接项目并发布版本
+                登录账号并发布版本
               </h2>
               <p>
-                在右上角“连接设置”输入 bootstrap
-                输出的项目令牌。只读令牌可以查询；发布、创建实验、取消、状态核对和重新评分需要
-                manage 权限。
+                注册后会自动创建个人工作空间。登录后发布目标、测试集和评分器，
+                实验与观测记录仅属于当前账号。右上角“账号设置”可以查看账号或退出登录。
               </p>
               <div className="guide-links">
                 <Link to="/targets">

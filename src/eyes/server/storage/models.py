@@ -109,12 +109,28 @@ class Project(Record):
     score_limit: Mapped[int] = mapped_column(default=2)
 
 
+class Account(Record):
+    __tablename__ = "accounts"
+    username: Mapped[str] = mapped_column(String(40), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"), unique=True)
+
+
+class AuthRateLimit(Base):
+    __tablename__ = "auth_rate_limits"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    attempts: Mapped[int]
+
+
 class Credential(Record):
     __tablename__ = "credentials"
     __table_args__ = (
         CheckConstraint("role IN ('read', 'manage', 'runner')", name="ck_credential_role"),
     )
     project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"), index=True)
+    account_id: Mapped[UUID | None] = mapped_column(ForeignKey("accounts.id"), index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     token_digest: Mapped[str] = mapped_column(String(64), unique=True)
     role: Mapped[str] = mapped_column(String(20))
     target_ids: Mapped[list] = mapped_column(JSONB, default=list)

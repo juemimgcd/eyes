@@ -124,14 +124,17 @@ export function useRealtime(api: Api | null, onExpired: () => void) {
     async function listen() {
       while (!signal.aborted) {
         try {
-          // Fetch carries the in-memory Bearer token; never put it in an SSE URL.
-          const response = await fetch(`${import.meta.env.BASE_URL}api/v1/realtime/stream`, {
-            headers: {
-              Authorization: `Bearer ${api!.token}`,
-              Accept: "text/event-stream",
+          // Same-origin fetch carries the HttpOnly session cookie.
+          const response = await fetch(
+            `${import.meta.env.BASE_URL}api/v1/realtime/stream`,
+            {
+              headers: {
+                ...api!.headers,
+                Accept: "text/event-stream",
+              },
+              signal,
             },
-            signal,
-          });
+          );
           if (response.status === 401 || response.status === 403) {
             controller.abort();
             onExpired();
