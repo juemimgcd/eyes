@@ -2,9 +2,9 @@
 
 入口：https://www.mneme.com.cn/eyes/。API 地址为 `/eyes/api`。
 
-`main` 每次 push 或手动触发 `Build and deploy Eyes` 后，GitHub Actions 执行 Ruff、前端 ESLint/TypeScript/构建，再将 linux/amd64 后端与前端镜像发布到 GHCR。镜像以完整 Git SHA 标记；两张镜像成功发布后，Actions 下载同一提交的镜像，通过 `docker save` 导出归档，使用 rsync 经 SSH 增量传输到 `/opt/eyes/images.tar`，再由服务器 `docker load` 导入并部署。其他分支不会部署。应用镜像的下载发生在 Actions，避免云服务器下载 GHCR 镜像层时连接重置导致发布失败；传输失败会停止部署。
+`main` 每次 push 或手动触发 `Build and deploy Eyes` 后，GitHub Actions 执行 Ruff、前端 ESLint/TypeScript/构建，再将 linux/amd64 后端与前端镜像发布到 GHCR。镜像以完整 Git SHA 标记；两张镜像成功发布后，Actions 下载同一提交的镜像，通过 `docker save` 导出并解开归档，使用 rsync 经 SSH 按文件校验同步到 `/opt/eyes/image-cache/`，再由服务器重新打包并通过 `docker load` 导入部署。其他分支不会部署。应用镜像的下载发生在 Actions，避免云服务器下载 GHCR 镜像层时连接重置导致发布失败；传输失败会停止部署。
 
-`/opt/eyes/images.tar` 是可重建的镜像传输缓存，不是数据库备份。保留未压缩归档使 rsync 可以复用上一版相同的数据块，仅在网络传输时压缩；首次部署没有缓存时需要完整传输。中断后再次传输会按 rsync 校验修复缓存，成功后才导入镜像。服务器需安装 rsync，缓存由 `eyes-deploy` 账号拥有；首次接入现有部署时可先用 `docker save` 导出当前前后端镜像到该路径作为基线，减少首次传输量。
+`/opt/eyes/image-cache/` 是可重建的镜像传输缓存，不是数据库备份。rsync 按文件校验内容，复用相同的镜像层，仅传输新增或变化的文件；首次部署没有缓存时需要完整传输。同步结束时仅在此专用缓存目录删除旧版本不再引用的文件，不删除 Docker 镜像或持久化数据卷。中断后再次同步会校验修复缓存，成功后才导入镜像。服务器需安装 rsync，缓存由 `eyes-deploy` 账号拥有；首次接入现有部署时可先用 `docker save` 导出当前前后端镜像，并解开到缓存目录作为基线，减少首次传输量。
 
 ## 服务器布局
 

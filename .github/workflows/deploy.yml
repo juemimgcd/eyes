@@ -82,7 +82,9 @@ jobs:
           printf 'EYES_CONTROL_IMAGE=ghcr.io/juemimgcd/eyes-control:%s\nEYES_FRONTEND_IMAGE=ghcr.io/juemimgcd/eyes-frontend:%s\n' "$REVISION" "$REVISION" > deploy/images.env
           scp deploy/compose.yaml deploy/compose.cloud.yaml deploy/release.sh deploy/images.env "eyes-deploy@124.223.14.145:$release/"
           docker save "$control" "$frontend" > "$RUNNER_TEMP/eyes-images.tar"
-          rsync --compress --inplace --stats "$RUNNER_TEMP/eyes-images.tar" eyes-deploy@124.223.14.145:/opt/eyes/images.tar
-          ssh eyes-deploy@124.223.14.145 'docker load --input /opt/eyes/images.tar'
+          mkdir "$RUNNER_TEMP/eyes-images"
+          tar -xf "$RUNNER_TEMP/eyes-images.tar" -C "$RUNNER_TEMP/eyes-images"
+          rsync --recursive --checksum --compress --delete-delay --stats "$RUNNER_TEMP/eyes-images/" eyes-deploy@124.223.14.145:/opt/eyes/image-cache/
+          ssh eyes-deploy@124.223.14.145 'set -euo pipefail; tar -C /opt/eyes/image-cache -cf - . | docker load'
           ssh eyes-deploy@124.223.14.145 "bash '$release/release.sh'"
           curl --fail --silent --show-error https://www.mneme.com.cn/eyes/api/health/ready
