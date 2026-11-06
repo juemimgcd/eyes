@@ -2,7 +2,7 @@
 
 入口：https://www.mneme.com.cn/eyes/。API 地址为 `/eyes/api`。
 
-`main` 每次 push 或手动触发 `Build and deploy Eyes` 后，GitHub Actions 执行 Ruff、前端 ESLint/TypeScript/构建，再将 linux/amd64 后端与前端镜像发布到 GHCR。镜像以完整 Git SHA 标记；两张镜像成功发布后，SSH 通知服务器拉取同一提交的镜像并部署。其他分支不会部署。
+`main` 每次 push 或手动触发 `Build and deploy Eyes` 后，GitHub Actions 执行 Ruff、前端 ESLint/TypeScript/构建，再将 linux/amd64 后端与前端镜像发布到 GHCR。镜像以完整 Git SHA 标记；两张镜像成功发布后，Actions 下载同一提交的镜像，通过 `docker save | gzip | SSH docker load` 导入服务器，再执行部署。其他分支不会部署。应用镜像的下载发生在 Actions，避免云服务器下载 GHCR 镜像层时连接重置导致发布失败；传输管道失败会停止部署。
 
 ## 服务器布局
 
@@ -14,11 +14,11 @@
 - 只有前端映射到 `127.0.0.1:8180`，数据库、消息队列和 API 无宿主机公开端口。
 - 现有 HTTPS Nginx 引入 `deploy/nginx-eyes.conf`；转发时剥离 `/eyes/` 前缀。前端构建基址和 BrowserRouter 为 `/eyes/`，FastAPI root_path 为 `/eyes/api`。
 
-部署账号 `eyes-deploy` 属于 Docker 组，属于高权限运维账号。仓库 Secrets `EYES_DEPLOY_SSH_KEY` 和 `EYES_DEPLOY_KNOWN_HOSTS` 分别存放专用私钥和已核对的主机公钥。GHCR 拉取使用当次 Actions 的短期 GITHUB_TOKEN，结束时 logout。不要在日志或 Git 中保存密钥。
+部署账号 `eyes-deploy` 属于 Docker 组，属于高权限运维账号。仓库 Secrets `EYES_DEPLOY_SSH_KEY` 和 `EYES_DEPLOY_KNOWN_HOSTS` 分别存放专用私钥和已核对的主机公钥。GHCR 认证仅在 Actions 内使用短期 GITHUB_TOKEN，不再将仓库令牌发送到服务器。不要在日志或 Git 中保存密钥。
 
 ## 部署顺序与失败处理
 
-部署使用文件锁串行执行：拉取镜像 → 启动依赖 → 备份已有数据库 → Alembic upgrade head → 更新 API/后台进程/前端 → 本机 ready 检查 → 更新 current → 公网 ready 检查。迁移失败会停止流程；更新后的健康检查失败会令 Actions 失败，不会自动回滚数据库。Compose 更新有短暂中断，不保证零停机。
+应用镜像导入完成后，部署使用文件锁串行执行：仅拉取本机缺失的镜像 → 启动依赖 → 备份已有数据库 → Alembic upgrade head → 更新 API/后台进程/前端 → 本机 ready 检查 → 更新 current → 公网 ready 检查。PostgreSQL、Redis、RabbitMQ 缺失或更换版本时仍需服务器访问其镜像仓库。迁移失败会停止流程；更新后的健康检查失败会令 Actions 失败，不会自动回滚数据库。Compose 更新有短暂中断，不保证零停机。
 
 此前成功部署目录和数据库备份保留。需要回退时先确认数据库迁移向后兼容，再在对应 release 目录运行 `bash release.sh`；不兼容迁移须人工恢复数据库及一致的产物卷。自动备份只覆盖 PostgreSQL，完整灾备还须保存 artifacts 卷；本流程不会自动删除备份或数据卷。
 

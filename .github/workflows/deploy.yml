@@ -70,15 +70,17 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
       - name: Deploy exact commit
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_USER: ${{ github.actor }}
           REVISION: ${{ github.sha }}
         run: |
+          set -euo pipefail
           release="/opt/eyes/releases/$REVISION"
+          control="ghcr.io/juemimgcd/eyes-control:$REVISION"
+          frontend="ghcr.io/juemimgcd/eyes-frontend:$REVISION"
+          docker pull --platform linux/amd64 "$control"
+          docker pull --platform linux/amd64 "$frontend"
           ssh eyes-deploy@124.223.14.145 "mkdir -p '$release'"
           printf 'EYES_CONTROL_IMAGE=ghcr.io/juemimgcd/eyes-control:%s\nEYES_FRONTEND_IMAGE=ghcr.io/juemimgcd/eyes-frontend:%s\n' "$REVISION" "$REVISION" > deploy/images.env
           scp deploy/compose.yaml deploy/compose.cloud.yaml deploy/release.sh deploy/images.env "eyes-deploy@124.223.14.145:$release/"
-          printf '%s' "$GH_TOKEN" | ssh eyes-deploy@124.223.14.145 "docker login ghcr.io -u '$GH_USER' --password-stdin"
-          trap 'ssh eyes-deploy@124.223.14.145 "docker logout ghcr.io"' EXIT
+          docker save "$control" "$frontend" | gzip -1 | ssh eyes-deploy@124.223.14.145 'docker load'
           ssh eyes-deploy@124.223.14.145 "bash '$release/release.sh'"
           curl --fail --silent --show-error https://www.mneme.com.cn/eyes/api/health/ready

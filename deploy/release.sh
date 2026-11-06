@@ -6,7 +6,9 @@ exec 9>/opt/eyes/deploy.lock
 flock 9
 compose=(docker compose --project-name eyes --env-file /opt/eyes/.env --env-file images.env -f compose.yaml -f compose.cloud.yaml)
 "${compose[@]}" config --quiet
-"${compose[@]}" pull
+# CI imports the exact application images over SSH before invoking this script.
+# Pull only missing images so imported releases do not depend on GHCR connectivity.
+"${compose[@]}" pull --policy missing
 "${compose[@]}" up -d --wait postgres redis rabbitmq
 # Existing databases are backed up before schema changes. Fresh installs have no current link.
 if [[ -L /opt/eyes/current ]]; then
