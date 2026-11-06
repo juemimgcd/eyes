@@ -36,6 +36,8 @@ def declare_queue(channel, queue, max_bytes, *, reliable):
         # Without this policy, dead-letter transfer itself may lose a result when
         # its destination is unavailable. Result messages require confirmed transfer.
         arguments["x-dead-letter-strategy"] = "at-least-once"
+        # Result workers must not process in parallel if another instance starts.
+        arguments["x-single-active-consumer"] = True
     channel.queue_declare(queue=queue, durable=True, arguments=arguments)
 
 
