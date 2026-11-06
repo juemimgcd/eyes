@@ -1,4 +1,4 @@
-"""Versioned summaries; Redis never owns authoritative state or a DB connection."""
+"""Cache-aside summaries; committed changes invalidate Redis through the outbox."""
 
 import json
 import logging
@@ -13,7 +13,8 @@ from sqlalchemy import select
 from eyes.server.api.dependencies import transaction
 from eyes.server.domain import DomainError, scoped
 from eyes.server.experiments.service import summary
-from eyes.server.storage.models import CacheEpoch, Experiment, ResourceRevision, now
+from eyes.server.realtime.keys import summary_key
+from eyes.server.storage.models import CacheEpoch, Experiment, now
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +49,7 @@ class SummaryCache:
 
     def key(self, session, project_id, experiment_id):
         epoch = session.scalar(select(CacheEpoch.epoch).where(CacheEpoch.id == 1))
-        revision = session.get(ResourceRevision, (project_id, "experiment", experiment_id))
-        version = revision.version if revision else 0
-        return (
-            f"{self.settings.redis_namespace}:summary:v2:{epoch}:"
-            f"{project_id}:{experiment_id}:{version}"
-        )
+        return summary_key(self.settings.redis_namespace, epoch, project_id, experiment_id)
 
     def record(self, **counts):
         with self.metrics_lock:

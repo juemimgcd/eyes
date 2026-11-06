@@ -12,8 +12,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from eyes.server.config import Settings
+from eyes.server.realtime.keys import summary_key
 from eyes.server.storage.database import database, maintenance_lock
-from eyes.server.storage.models import NotificationOutbox, now
+from eyes.server.storage.models import CacheEpoch, NotificationOutbox, now
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def publish(sessions, client, settings):
     token, current = uuid4(), now()
     with sessions.begin() as session:
         maintenance_lock(session)
+        epoch = session.scalar(select(CacheEpoch.epoch).where(CacheEpoch.id == 1))
         rows = session.scalars(
             select(NotificationOutbox)
             .where(
@@ -71,6 +73,17 @@ def publish(sessions, client, settings):
         # absence of subscribers does not imply any durable event was lost.
         with client.pipeline(transaction=False) as pipeline:
             for item in batch:
+                # Only experiments have summary cache entries. Delete before notifying
+                # readers, after the business transaction has committed.
+                if item["kind"] == "experiment":
+                    pipeline.delete(
+                        summary_key(
+                            settings.redis_namespace,
+                            epoch,
+                            item["project_id"],
+                            item["resource_id"],
+                        )
+                    )
                 pipeline.publish(
                     f"{settings.redis_namespace}:updates:{item['project_id']}",
                     json.dumps(item, separators=(",", ":")),
@@ -78,7 +91,7 @@ def publish(sessions, client, settings):
             pipeline.execute()
     except RedisError as error:
         failure = error
-        logger.exception("notification_publish_failed; durable rows retained")
+        logger.exception("cache_invalidation_or_notification_failed; durable rows retained")
     with sessions.begin() as session:
         maintenance_lock(session)
         rows = session.scalars(

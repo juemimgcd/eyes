@@ -251,9 +251,10 @@ Outbox；提交失败时业务数据、版本和通知一起回滚。版本锁�
 事务内执行。事件游标单独存储，不修改不可变原始事件。
 
 每个资源只保留一条待发布通知，多次变化合并为最新版本；原始事件仍全部保存在 PostgreSQL。
-`eyes-publisher` 用短事务领取通知，事务外发布 Redis Pub/Sub，再按领取 token 和版本确认。
+`eyes-publisher` 用短事务领取通知，事务外先删除实验汇总缓存，再发布 Redis Pub/Sub，
+最后按领取 token 和版本确认；非实验通知不执行汇总缓存删除。
 发布期间若资源再次变化，确认不会删除新版本。中断可能导致重复通知；Redis 没有订阅者时
-也可完成 publish，因此“发布成功”不等于所有页面已收到。发布失败保留原记录并有界退避。
+也可完成 publish，因此“发布成功”不等于所有页面已收到。删除或发布失败保留原记录并有界退避。
 
 ```sh
 uv run alembic upgrade head
@@ -289,15 +290,35 @@ sequence。晚到的小 sequence 不会被接收游标跳过。历史事件在�
 验证凭据并要求补查，Redis 断开/重连也触发补查。前端合并 500 ms 内的查询失效通知，
 每 30 秒保底刷新活动查询；已移除各页面原有的 2～15 秒重复轮询。令牌不进入 URL。
 
-实验 `/results` 使用项目、数据库时间线、实验 ID 和资源版本组成的缓存键。
+### 汇总缓存：先更新数据库，再删除缓存（2026-11-06）
+
+实验 `/results` 使用项目、数据库时间线和实验 ID 组成的固定缓存键
+`{namespace}:summary:v3:{epoch}:{project_id}:{experiment_id}`，不再包含资源版本号。
 响应的 `computed_at` 记录实际计算统计的时间，缓存命中保留该时间，控制台显示统计更新时间。
-每次查询先用短事务确认权限与版本，Redis I/O 不占用 PostgreSQL 事务。未命中时在
-REPEATABLE READ 快照内读取版本和汇总，防止把旧结果写入新版本。缓存默认保留 60 秒，
+每次查询先用短事务确认项目归属与数据库时间线，Redis I/O 不占用 PostgreSQL 事务。
+未命中时在 REPEATABLE READ 快照内读取时间线和汇总，回填 Redis。缓存默认保留 60 秒，
 每进程最多 4 个并发汇总计算，超出返回 `503 summary_busy`；Redis 连接失败后暂停
 访问 5 秒，继续使用同一计算上限。可通过 `EYES_CACHE_TTL_SECONDS` 和
 `EYES_CACHE_QUERY_CONCURRENCY` 调整。`0006_cache_epoch` 增加时间线标识，
-`eyes-ops restore` 恢复后更换标识，避免旧 Redis 键与恢复后的版本号冲突。
+`eyes-ops restore` 恢复后更换标识，避免恢复后的查询使用旧时间线缓存。
 手工恢复数据库时，应在开放 API 前清空专用 Redis 缓存或更新 `cache_epoch.epoch`。
+
+业务更新和实验 Outbox 记录在同一个 PostgreSQL 事务提交；`eyes-publisher`
+默认每 0.5 秒轮询已提交记录，依次执行 Redis `DEL`、Pub/Sub 发布，再确认 Outbox。
+删除失败会保留记录，按既有退避机制重试；删除成功后进程中断也可安全重复删除。
+发布期间出现的新版本不会被旧批次确认清除，下一轮仍会再次删除缓存。
+资源版本继续用于通知和事件补查，不再用于汇总缓存寻址。
+
+这是异步最终一致性，不保证写接口返回时已完成删缓存。启用 Redis 缓存时需同时运行
+`eyes-publisher`；进程停机或发生积压时缓存仍可能命中旧值，TTL 保留为兜底。
+读请求在删除完成后仍可能回填此前快照的旧值，此时旧值可保留到回填后 TTL 到期，
+因此 60 秒不是从业务提交开始计算的严格延迟上限。本次未增加分布式锁或延迟双删。
+
+升级时 API 和 publisher 应一起更新；v3 key 与旧 v2 版本缓存隔离，旧 key 自然过期，
+不需要清空整个 Redis。此改动无需数据库迁移。
+本次已通过全仓 Ruff lint、涉及文件的格式检查和 diff 检查；未完成实时故障回归。
+既有 `validate_storage.py` 的版本失效检查要求提交后立即读取新状态，未启动 publisher，
+不适用于这次异步失效语义；本次没有修改该脚本，也不将旧缓存压测视为新版验证。
 
 `GET /v1/operations` 的 `summary_cache` 提供当前 API 进程自 `since` 起的诊断计数：
 `hits`/`misses` 是成功读取 Redis 后的命中/未命中；`bypasses` 是未配置 Redis 或处于
