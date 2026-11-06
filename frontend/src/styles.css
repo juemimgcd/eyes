@@ -3488,3 +3488,73 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Execution evidence: receipt-order timeline and measured SDK span intervals. */
+.execution-view-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+}
+.execution-timeline .event-choice-copy {
+  flex: 1;
+}
+.execution-timeline .event-order {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  width: 20px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.execution-timeline .event-order::after {
+  content: "";
+  position: absolute;
+  top: 26px;
+  bottom: -10px;
+  width: 1px;
+  background: var(--line-strong);
+}
+.execution-timeline .event-choice:last-child .event-order::after {
+  display: none;
+}
+.execution-timeline .event-choice[data-failed="true"] .event-order {
+  color: var(--destructive);
+}
+.execution-duration-track {
+  display: block;
+  position: relative;
+  height: 6px;
+  margin-top: 12px;
+  background: var(--line);
+  border-radius: 2px;
+}
+.execution-duration-track > span {
+  position: absolute;
+  height: 100%;
+  min-width: 2px;
+  max-width: 100%;
+  background: var(--text-muted);
+  border-radius: inherit;
+}
+.execution-timeline .selected .execution-duration-track > span {
+  background: var(--link-color);
+}
+.execution-relations {
+  display: grid;
+  gap: 10px;
+  margin-block: var(--space-6);
+}
+.execution-relations h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.execution-relations button {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
