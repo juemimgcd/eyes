@@ -16,10 +16,11 @@ Python 执行失败本身是合法结果：`status=failed` 与错误信息正常
 ## 串行消费约定
 
 最终结果统一进入 `EYES_RESULT_QUEUE` 指定的一个队列，部署只运行一个
-`eyes-result-consumer` 进程。消费者在主线程中通过 `basic_get(auto_ack=False)`
-逐条取消息，完成当前消息的数据库提交和 ACK，或拒绝转死信后，才取下一条；
-没有线程池或并行消费。这里的串行处理来自同步取消息循环，不依赖 prefetch
-对 `basic_get` 限流。
+`eyes-result-consumer` 进程。结果源队列启用 `x-single-active-consumer=true`；
+消费者通过 `channel.consume(auto_ack=False)` 注册订阅，设置 `prefetch_count=1`，
+在主线程逐条处理，完成数据库提交和 ACK，或拒绝转死信后，才接收下一条。
+没有线程池或并行消费。误启动额外消费者时，RabbitMQ 只向一个活跃消费者投递，
+其他订阅待命；活跃消费者断开后，broker 可选择待命消费者接替。
 
 - 无效消息（无法解析的消息 ID、正文或正文与回执摘要不符）直接拒绝转死信；
   永久业务拒绝先保存 rejected 回执和具体原因，再拒绝转死信，随后继续处理后续消息。
@@ -34,9 +35,10 @@ Python 执行失败本身是合法结果：`status=failed` 与错误信息正常
 多个生产者的业务发生顺序等于入队顺序。暂时故障和消费能力不足仍会造成积压，
 继续由队列容量上限及 Runner 本地背压控制。
 
-单消费者是部署约定：当前没有启用 broker 的 Single Active Consumer，也没有
-跨进程互斥锁。不要扩容 result-consumer，或在 Compose 消费者运行时额外启动
-本机消费者；否则会并行消费同一队列。
+quorum 队列启用 Single Active Consumer 后会拒绝 `basic_get`，旧版消费者不能继续使用。
+常驻进程、`--once` 和 `receive_one` 均走订阅；`receive_one` 处理一次后取消订阅。
+`--once` 最多处理一条消息，等待 0.2 秒未收到消息也会退出；待命时退出不代表队列为空。
+该机制不承诺网络故障下外部副作用恰好执行一次，数据库幂等仍须保留。
 
 ## 故障与死信
 
@@ -55,6 +57,23 @@ PostgreSQL/产物备份不包含 RabbitMQ 消息正文，存在 pending 结果�
 ## 配置与升级
 
 迁移：`0010_result_submissions`，新增 `result_submissions` 回执表。已存在的事件回执表保持不变。
+
+### 已有队列升级为单活跃消费者
+
+`x-single-active-consumer` 是声明参数，不能通过 policy 或原地重声明修改。
+新版 API 发布器和消费者都会声明该参数，直接连接旧队列会得到
+`PRECONDITION_FAILED`；必须在部署新版前完成以下切换准备：
+
+1. 暂停领取新任务，等待活跃任务完成上报并暂停新的结果发布；保留旧版 API 和消费者排空旧队列。
+2. 确认旧队列 ready、unacknowledged 均为 0，且数据库没有 pending 结果回执；
+   单独核对 rejected 回执及旧死信队列，保留其内容供人工处理。
+3. 停止旧版 API 和结果消费者，将二者的 `EYES_RESULT_QUEUE` 同时改为一个未使用的队列名，
+   例如 `eyes.results.sac.v1`，再部署新版；发布器和消费者将创建带 SAC 的新队列及其 `.rejected` 队列。
+4. 确认新队列带有 `x-single-active-consumer=true`，消费者连接正常后恢复上报和领取。
+
+不要同时用新旧消费者处理结果，也不要直接删除仍有消息的旧队列；新队列不会自动迁移旧消息。
+回滚同样需先排空新队列再切换 API 和消费者，不能用旧版重新声明带 SAC 参数的队列。
+本次代码变更不会自动清空、删除或迁移任何运行中的队列。
 
 ```sh
 uv sync --frozen
@@ -75,6 +94,22 @@ event_delivery = "direct"
 Compose 默认新增 result-consumer；先前的 event-consumer 移到 `queued-events` profile。若需要异步事件消费，可使用 `--profile queued-events` 单独启用，并将 Runner 的 event_delivery 改为 queued。两个消费者共用镜像，各自消费独立队列。
 
 发布器共享 `EYES_EVENT_QUEUE_MAX_BYTES`、`EYES_EVENT_PUBLISH_CONCURRENCY`、`EYES_EVENT_BROKER_TIMEOUT_SECONDS` 这组已有预算配置；并发额度是每个发布器实例独立计算。配置字段暂未重命名，以保留先前配置兼容性。
+
+## 2026-11-06 单活跃消费者验证
+
+本次在专用容器中使用新数据库 `eyes_sac_20261106` 和新队列
+`eyes.results.sac.validation.20261106`，未操作线上服务：
+
+- 启动两个实际结果消费者，`rabbitmqctl list_consumers` 显示一个 `active=true`、
+  一个 `active=false`，两者均为手动 ACK、`prefetch_count=1`。
+- 停止活跃消费者后，原待命消费者变为 `active=true`。
+- 现有验证脚本发布的一条结果由新版订阅消费者处理，数据库回执为 `persisted`。
+- 全仓 Ruff lint、修改的 Python 文件格式检查及 `git diff --check` 通过。
+
+完整 `scripts/validate_result_queue.py` 未通过：脚本在故障注入前直接使用
+`basic_get`，新 quorum/SAC 队列返回 405 `RESOURCE_LOCKED`，因此本轮未完成
+重复投递、死信和数据库停机恢复的完整回归。未修改或新增测试脚本；历史验证记录
+不代表这些场景已在新版重新通过。本次未部署线上，也未验证网络分区或处理中的强制终止。
 
 ## 2026-11-05 本地验证
 

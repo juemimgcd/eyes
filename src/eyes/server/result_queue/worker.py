@@ -19,9 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 def receive_one(channel, sessions, settings, store):
-    method, properties, body = channel.basic_get(queue=settings.result_queue, auto_ack=False)
+    """Process at most one delivery through a short-lived SAC subscription."""
+    channel.basic_qos(prefetch_count=1)
+    method, properties, body = next(
+        channel.consume(settings.result_queue, auto_ack=False, inactivity_timeout=0.2)
+    )
     if method is None:
+        channel.cancel()
         return False
+    process_message(channel, method, properties, body, sessions, settings, store)
+    channel.cancel()
+    return True
+
+
+def process_message(channel, method, properties, body, sessions, settings, store):
     try:
         receipt_id = UUID(properties.message_id)
         submission = ExecutionSubmission.model_validate_json(body)
@@ -36,7 +47,6 @@ def receive_one(channel, sessions, settings, store):
             channel.basic_reject(method.delivery_tag, requeue=False)
         else:
             channel.basic_ack(method.delivery_tag)
-    return True
 
 
 def main():
@@ -64,12 +74,18 @@ def main():
                         reliable=True,
                     )
                     channel.basic_qos(prefetch_count=1)
-                    while not stop.is_set():
-                        received = receive_one(channel, sessions, settings, store)
+                    for method, properties, body in channel.consume(
+                        settings.result_queue, auto_ack=False, inactivity_timeout=0.2
+                    ):
+                        # Wake while idle so SIGTERM also stops an empty/standby consumer.
+                        if stop.is_set():
+                            break
+                        if method is not None:
+                            process_message(
+                                channel, method, properties, body, sessions, settings, store
+                            )
                         if args.once:
                             return
-                        if not received:
-                            connection.sleep(0.2)
             except pika.exceptions.AMQPError, SQLAlchemyError, DomainError:
                 logger.exception(
                     "result_consumer_failed; unacknowledged result will be redelivered"
