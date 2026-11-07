@@ -1,11 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from sqlalchemy import select
 
 from eyes.contracts.pairing import PairingCreate, PairingRedeem
 from eyes.server.api.dependencies import Database, Manager
-from eyes.server.domain import scoped
+from eyes.server.domain import DomainError, scoped
 from eyes.server.pairing import service
 from eyes.server.storage.models import AgentPairing
 
@@ -19,9 +19,11 @@ def create(body: PairingCreate, session: Database, user: Manager, response: Resp
 
 
 @router.post("/redeem")
-def redeem(body: PairingRedeem, session: Database, response: Response):
+def redeem(body: PairingRedeem, session: Database, response: Response, request: Request):
     response.headers["Cache-Control"] = "no-store"
-    return service.redeem(session, body)
+    if body.adapter == "tunnel" and not request.app.state.settings.tunnel_enabled:
+        raise DomainError(503, "tunnel_disabled", "tunnel deployment is not enabled")
+    return service.redeem(session, body, request.app.state.settings.tunnel_gateway_url)
 
 
 @router.get("")

@@ -8,7 +8,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 COPY alembic.ini ./
 COPY migrations ./migrations
-RUN useradd --create-home --uid 10001 eyes && mkdir -p /app/data/artifacts \
+RUN useradd --create-home --uid 10001 eyes && mkdir -p /app/data/artifacts /app/data/tunnel-runner \
     && chown -R eyes:eyes /app/data
 ENV PATH="/app/.venv/bin:$PATH"
 USER eyes

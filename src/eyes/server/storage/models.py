@@ -126,7 +126,9 @@ class AuthRateLimit(Base):
 class Credential(Record):
     __tablename__ = "credentials"
     __table_args__ = (
-        CheckConstraint("role IN ('read', 'manage', 'runner')", name="ck_credential_role"),
+        CheckConstraint(
+            "role IN ('read', 'manage', 'runner', 'tunnel')", name="ck_credential_role"
+        ),
     )
     project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"), index=True)
     account_id: Mapped[UUID | None] = mapped_column(ForeignKey("accounts.id"), index=True)
@@ -410,5 +412,7 @@ class AgentPairing(Record):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     credential_id: Mapped[UUID | None] = mapped_column(ForeignKey("credentials.id"))
     target_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("target_versions.id"))
+    observation_source_id: Mapped[UUID | None] = mapped_column(ForeignKey("observation_sources.id"))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     redemption_digest: Mapped[str | None] = mapped_column(String(64))
     revoked: Mapped[bool] = mapped_column(default=False)

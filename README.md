@@ -2,11 +2,13 @@
 
 Eyes 的产品目标是成为 Agent 测试与执行观测平台，支持外部测试集、自定义评分、并发执行和过程追踪，并通过版本记录、回归对比及评分证据帮助开发者验证修改效果。
 
-当前已实现控制后端、独立 Runner、HTTP/Python 接入、独立评分进程、SDK 与 Web 控制台。平台现已加入持久化回归报告、CI 门槛与开发者 CLI、服务端证据等待、评分取消/重试、证据保留清理，以及存储审计和备份恢复工具。当前迁移为 `0012_personal_accounts`。2026-10-03 已用真实 Deta coding agent 完成 Python 接入、3 个编码任务、产物上传和独立评分，见 [接入与实测记录](integrations/deta/README.md)。2026-10-08 完成 Deta 与 Zeta 双 Python Agent 的并发、受控工作进程中断和整批取消验证，见 [Zeta 接入记录](integrations/zeta/README.md)。真实 HTTP Agent、Runner 整体重启恢复及容量验收仍待完成。实现范围见 [平台功能说明](docs/platform.md)，此前的平台验证见 [平台验证记录](docs/platform-validation.md)。下文的完整产品目标不等同于全部验收通过。
+当前已实现控制后端、独立 Runner、HTTP/Python 接入、独立评分进程、SDK 与 Web 控制台。平台现已加入持久化回归报告、CI 门槛与开发者 CLI、服务端证据等待、评分取消/重试、证据保留清理，以及存储审计和备份恢复工具。当前迁移为 `0013_tunnel_connections`。2026-10-03 已用真实 Deta coding agent 完成 Python 接入、3 个编码任务、产物上传和独立评分，见 [接入与实测记录](integrations/deta/README.md)。2026-10-08 完成 Deta 与 Zeta 双 Python Agent 的并发、受控工作进程中断和整批取消验证，见 [Zeta 接入记录](integrations/zeta/README.md)。真实 HTTP Agent、Runner 整体重启恢复及容量验收仍待完成。实现范围见 [平台功能说明](docs/platform.md)，此前的平台验证见 [平台验证记录](docs/platform-validation.md)。下文的完整产品目标不等同于全部验收通过。
 
 系统边界、技术选择、接入契约、故障处理和交付阶段见 [首版架构方案](docs/architecture.md)。当前实现、启动命令、API 清单和 Runner 接入约定见 [后端开发说明](docs/backend.md)，HTTP 协议、本地入口、SDK、评分器与恢复说明见 [Agent 接入文档](docs/agent-integration.md)，验证记录见 [后端验证记录](docs/backend-validation.md)。
 
 ## 从自己的机器连接公网 Eyes
+
+已有 HTTP Agent 可使用可选的 [Go 隧道接入](docs/tunnel.md)：用户机器下载独立程序，不需要 Python 或 Eyes 包；支持 HTTP JSON、Chat Completions/SSE 及配置式模型通信观测。需另行部署 Gateway 并配置云端执行 Runner；真实 Agent 联调尚未进行。
 
 目标 Agent 页的“接入 Agent”可生成一次性连接命令。在 Agent 所在 macOS/Linux 机器安装同版本 Eyes 后运行 `eyes connect`，由连接进程主动通过 HTTPS 领取任务，不需要入站端口或公网 Agent 地址。支持 Python `execute(input, context)` 和本地 HTTP 接口，默认串行执行；配对自动发布目标并绑定仅限该版本的执行凭据。重启、密钥配置、升级与验证边界见 [主动连接接入](docs/connector.md)。这不改变被动观测入口，也不代表多租户公网服务已完成安全验收。
 

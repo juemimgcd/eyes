@@ -325,6 +325,21 @@ class RunnerService:
         secrets = resolve_secrets(
             request.target.secret_refs, self.config.secret_env_allowlist, self.config.token_env
         )
+        if request.target.config.get("tunnel"):
+            # Never send the Runner credential to a target-controlled destination.
+            from urllib.parse import urlsplit
+
+            gateway = self.config.tunnel_gateway_url
+            actual = urlsplit(request.target.config["url"])
+            expected = urlsplit(gateway or "")
+            if (
+                request.target.capabilities.adapter != "http"
+                or not gateway
+                or (actual.scheme, actual.netloc) != (expected.scheme, expected.netloc)
+                or not actual.path.startswith("/invoke/")
+            ):
+                raise ValueError("tunnel target requires the configured trusted Gateway")
+            secrets["_tunnel_authorization"] = self.client.client.headers["Authorization"]
         worker = ProcessWorker(self.config, lambda value: self._operation(lease, directory, value))
         started = intended = stopped = journal_gap = False
         result = None

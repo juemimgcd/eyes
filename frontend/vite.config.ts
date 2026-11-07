@@ -8,6 +8,15 @@ export default defineConfig(({ mode }) => {
   const target = env.EYES_API_PROXY_TARGET || "http://127.0.0.1:8000";
   const direct = { target, changeOrigin: true };
   const proxy = {
+    "/tunnel/connect": {
+      target: env.EYES_TUNNEL_PROXY_TARGET || "http://127.0.0.1:8090",
+      ws: true,
+      rewrite: (path: string) => path.replace(/^\/tunnel/, ""),
+    },
+    "/tunnel/downloads": {
+      target: env.EYES_TUNNEL_PROXY_TARGET || "http://127.0.0.1:8090",
+      rewrite: (path: string) => path.replace(/^\/tunnel/, ""),
+    },
     "/openapi.json": direct,
     "/docs": direct,
     "/v1": direct,

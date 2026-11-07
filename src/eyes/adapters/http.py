@@ -18,6 +18,8 @@ class SecretHeader(BaseModel):
 class HttpConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     url: str
+    tunnel: bool = False
+    protocol: Literal["json", "chat_completions"] = "json"
     request_mode: Literal["input", "envelope"] = "envelope"
     response_mode: Literal["output", "result"] = "output"
     output_pointer: str = ""
@@ -32,6 +34,9 @@ class HttpConfig(BaseModel):
 
     @model_validator(mode="after")
     def pointers(self):
+        # Tunnel cancellation is unconfirmed; never send Gateway credentials to another URL.
+        if self.tunnel and (self.cancel_url or self.reconcile_url):
+            raise ValueError("tunnel targets do not support remote cancel/reconcile endpoints")
         for pointer in [self.output_pointer, self.operation_pointer]:
             if pointer and not pointer.startswith("/"):
                 raise ValueError("response pointers must use JSON Pointer syntax")
@@ -54,6 +59,7 @@ class HttpAdapter:
         self.allowed_origins = allowed_origins
         self._capabilities = capabilities
         self.operation_id = None
+        self.response_issues = []
         self.cancelled = threading.Event()
         self.client = httpx.Client(follow_redirects=False, trust_env=False)
 
@@ -100,6 +106,8 @@ class HttpAdapter:
             "X-Eyes-Attempt-Id": str(request.attempt_id),
             "X-Eyes-Session-Id": str(request.attempt_id),
         }
+        if self.config.tunnel:
+            headers["Authorization"] = self.context.secrets["_tunnel_authorization"]
         remaining = max(0.1, (request.deadline - datetime.now(UTC)).total_seconds())
         timeout = min(remaining, self.config.request_timeout_seconds)
         with self.context.span("http.request", {"http.request.method": "POST"}):
@@ -118,7 +126,32 @@ class HttpAdapter:
                     )
                 import json
 
-                return response.status_code, json.loads(b"".join(chunks))
+                body = b"".join(chunks)
+                if (
+                    self.config.protocol == "chat_completions"
+                    and "text/event-stream" in response.headers.get("content-type", "")
+                ):
+                    from eyes.tracing.chat_protocol import capture_response
+
+                    parsed, issues = capture_response(body, streaming=True)
+                    # Unsupported observation fields do not invalidate a completed call.
+                    self.response_issues = issues
+                    fatal = [
+                        issue
+                        for issue in issues
+                        if issue
+                        not in {
+                            "unsupported_delta_fields",
+                            "legacy_function_call_not_reconstructed",
+                            "non_function_tool_not_reconstructed",
+                        }
+                    ]
+                    if fatal or parsed.get("error"):
+                        raise ValueError(
+                            f"incomplete Agent SSE response: {fatal or ['upstream_error']}"
+                        )
+                    return response.status_code, parsed
+                return response.status_code, json.loads(body)
 
     def execute(self, request):
         payload = (
@@ -163,6 +196,9 @@ class HttpAdapter:
                 evidence_status="sealed",
                 dropped_events=0,
             )
+        if self.response_issues:
+            result.evidence_status = "partial"
+            result.evidence_details["response_capture_issues"] = self.response_issues
         if self.operation_id:
             result.remote_operation_id = self.operation_id
         return result
