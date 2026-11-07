@@ -23,6 +23,11 @@ class Parser(argparse.ArgumentParser):
 
 
 def main():
+    if sys.argv[1:2] == ["trace"]:
+        from eyes.tracing.cli import main as trace
+
+        trace(sys.argv[2:])
+        return
     if sys.argv[1:2] == ["connect"]:
         from pydantic import ValidationError
 
