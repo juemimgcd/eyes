@@ -34,7 +34,16 @@ export function AgentConnectDialog({
   const client = useQueryClient();
   const [remote, setRemote] = useState(false);
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<"python" | "http">("python");
+  const [mode, setMode] = useState<"python" | "http" | "tunnel">("tunnel");
+  const [platform, setPlatform] = useState("darwin-arm64");
+  const [protocol, setProtocol] = useState("json");
+  const [modelUpstream, setModelUpstream] = useState("");
+  const tunnelConfig = useQuery({
+    queryKey: ["tunnel-config"],
+    queryFn: ({ signal }) =>
+      api!.request<{ enabled: boolean }>("/v1/tunnel/config", { signal }),
+    enabled: !!api,
+  });
   const [entry, setEntry] = useState("");
   const [url, setUrl] = useState("");
   const [pairing, setPairing] = useState<Pairing | null>(null);
@@ -54,8 +63,18 @@ export function AgentConnectDialog({
     `${import.meta.env.BASE_URL}api`,
     window.location.origin,
   ).href;
+  const windows = platform === "windows-amd64";
+  const shellQuote = (value: string) =>
+    windows ? `'${value.replaceAll("'", "''")}'` : quote(value);
+  const binary = windows ? "eyes-tunnel.exe" : "eyes-tunnel";
+  const download = new URL(
+    `${import.meta.env.BASE_URL}tunnel/downloads/eyes-tunnel-${platform}${windows ? ".exe" : ""}`,
+    window.location.origin,
+  ).href;
   const command = pairing
-    ? `eyes connect --server ${quote(server)} --pair-code ${quote(pairing.code!)} ${mode === "python" ? `--entry ${quote(entry.trim())}` : `--url ${quote(url.trim())}`}`
+    ? mode === "tunnel"
+      ? `${windows ? ".\\" : "./"}${binary} --server ${shellQuote(server)} --pair-code ${shellQuote(pairing.code!)} --local ${shellQuote(url.trim())} --protocol ${protocol}${modelUpstream.trim() ? ` --model-upstream ${shellQuote(modelUpstream.trim())}` : ""}`
+      : `eyes connect --server ${quote(server)} --pair-code ${quote(pairing.code!)} ${mode === "python" ? `--entry ${quote(entry.trim())}` : `--url ${quote(url.trim())}`}`
     : "";
 
   async function create(event: React.SubmitEvent<HTMLFormElement>) {
@@ -121,10 +140,13 @@ export function AgentConnectDialog({
           <select
             value={mode}
             disabled={busy || !!pairing}
-            onChange={(e) => setMode(e.target.value as "python" | "http")}
+            onChange={(e) =>
+              setMode(e.target.value as "python" | "http" | "tunnel")
+            }
           >
+            <option value="tunnel">HTTP 隧道 · 无需 Python</option>
             <option value="python">Python 函数</option>
-            <option value="http">HTTP 接口</option>
+            <option value="http">HTTP 接口 · 原有 Runner</option>
           </select>
         </Field>
         {mode === "python" ? (
@@ -156,14 +178,85 @@ export function AgentConnectDialog({
             />
           </Field>
         )}
-        <p className="muted">
-          在 macOS 或 Linux 上安装与平台同版本的 Eyes（Python ≥3.14），然后在
-          Agent 项目目录执行命令。默认串行运行；模型密钥保留在你的机器。
-        </p>
+        {mode === "tunnel" && (
+          <>
+            <Field label="Agent 所在机器的系统">
+              <select
+                value={platform}
+                disabled={busy || !!pairing}
+                onChange={(e) => setPlatform(e.target.value)}
+              >
+                <option value="darwin-arm64">macOS · Apple Silicon</option>
+                <option value="linux-amd64">Linux · amd64</option>
+                <option value="windows-amd64">
+                  Windows · amd64（PowerShell）
+                </option>
+              </select>
+            </Field>
+            <Field
+              label="接口协议"
+              hint="测试用例输入须符合所选接口的请求格式。"
+            >
+              <select
+                value={protocol}
+                disabled={busy || !!pairing}
+                onChange={(e) => setProtocol(e.target.value)}
+              >
+                <option value="json">HTTP JSON</option>
+                <option value="chat_completions">
+                  OpenAI Chat Completions · 支持 SSE
+                </option>
+              </select>
+            </Field>
+            <Field
+              label="原模型 API 地址（可选）"
+              hint="填写后启用模型通信观测。将 Agent 的模型 base URL 改为 http://127.0.0.1:8787/v1；仅展示经过代理的通信，不能证明工具实际执行。"
+            >
+              <input
+                type="url"
+                value={modelUpstream}
+                placeholder="https://模型服务地址/v1"
+                disabled={busy || !!pairing}
+                onChange={(e) => setModelUpstream(e.target.value)}
+              />
+            </Field>
+            <p className="muted">
+              下载独立连接程序，在 Agent 机器上保持运行。无需安装 Python 或 Eyes
+              包；默认串行执行，密钥保留在本地。
+            </p>
+            {tunnelConfig.isPending && (
+              <p role="status">正在检查隧道服务配置…</p>
+            )}
+            {tunnelConfig.error && (
+              <ErrorNotice
+                error={tunnelConfig.error}
+                retry={() => void tunnelConfig.refetch()}
+              />
+            )}
+            {tunnelConfig.data && !tunnelConfig.data.enabled && (
+              <p role="status">
+                管理员尚未启用隧道部署，可先使用原有接入方式。
+              </p>
+            )}
+          </>
+        )}
+        {mode !== "tunnel" && (
+          <p className="muted">
+            在 macOS 或 Linux 上安装与平台同版本的 Eyes（Python ≥3.14），然后在
+            Agent 项目目录执行命令。默认串行运行；模型密钥保留在你的机器。
+          </p>
+        )}
         {!!error && <ErrorNotice error={error} />}
         {!pairing && (
           <div className="form-actions">
-            <button className="button primary" disabled={busy || !name.trim()}>
+            <button
+              className="button primary"
+              disabled={
+                busy ||
+                !name.trim() ||
+                (mode === "tunnel" && !tunnelConfig.data?.enabled)
+              }
+            >
               {busy ? "正在生成…" : "生成连接命令"}
             </button>
           </div>
@@ -177,6 +270,19 @@ export function AgentConnectDialog({
             </p>
             {current?.status === "pending" && (
               <>
+                {mode === "tunnel" && (
+                  <p>
+                    <a className="text-link" href={download} download={binary}>
+                      下载 {binary}
+                    </a>
+                    {!windows && (
+                      <>
+                        {" "}
+                        · 下载后先运行 <code>chmod +x eyes-tunnel</code>
+                      </>
+                    )}
+                  </p>
+                )}
                 <Field
                   label="连接命令"
                   hint="配对码只能绑定一个连接，请勿分享。关闭后不再显示配对码。"
@@ -200,7 +306,12 @@ export function AgentConnectDialog({
             {current?.target_version_id && (
               <p>
                 目标已注册。在线只表示连接进程最近有活动；业务执行需在创建实验后验证。停止进程后，可用{" "}
-                <code>eyes connect</code> 在原目录重新连接。
+                <code>
+                  {mode === "tunnel"
+                    ? `${windows ? ".\\" : "./"}${binary}`
+                    : "eyes connect"}
+                </code>{" "}
+                在原目录重新连接。
               </p>
             )}
             {(current?.status === "expired" ||
@@ -237,7 +348,10 @@ export function AgentConnectDialog({
           <p className="muted">尚未创建连接。</p>
         )}
         {connections.data?.items.map((item) => (
-          <div className="flex items-center justify-between gap-4" key={item.id}>
+          <div
+            className="flex items-center justify-between gap-4"
+            key={item.id}
+          >
             <span>
               {item.name} · {labels[item.status]}
             </span>

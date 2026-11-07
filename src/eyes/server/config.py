@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     pending_artifact_ttl_hours: int = Field(default=24, ge=1)
     orphan_artifact_grace_hours: int = Field(default=24, ge=1)
     trace_console_export: bool = False
+    tunnel_enabled: bool = False
+    tunnel_gateway_url: str = "http://gateway:8090"
     local_observation: bool = False
     local_observation_project_id: UUID | None = None
 

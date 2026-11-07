@@ -1,0 +1,10 @@
+# One cloud Runner per authorized project; its credential is not the tunnel token.
+server_url = "http://api:8000"
+name = "cloud-tunnel-runner"
+state_dir = "/app/data/tunnel-runner"
+execution_slots = 4
+score_slots = 1
+result_delivery = "direct"
+allowed_http_origins = ["http://gateway:8090"]
+tunnel_gateway_url = "http://gateway:8090"
+secret_env_allowlist = []

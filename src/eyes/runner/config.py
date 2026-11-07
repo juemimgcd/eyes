@@ -59,6 +59,7 @@ class RunnerConfig(BaseModel):
     outbox_bytes: int = Field(default=128 * 1024 * 1024, ge=1024 * 1024)
     max_artifact_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
     max_artifacts: int = Field(default=20, ge=0, le=1000)
+    tunnel_gateway_url: str | None = None
     allowed_http_origins: list[str] = Field(default_factory=list)
     secret_env_allowlist: list[str] = Field(default_factory=list)
     python_agents: dict[str, Binding] = Field(default_factory=dict)
@@ -67,6 +68,8 @@ class RunnerConfig(BaseModel):
     @model_validator(mode="after")
     def check_config(self):
         origin(self.server_url)
+        if self.tunnel_gateway_url:
+            origin(self.tunnel_gateway_url)
         self.allowed_http_origins = [origin(item) for item in self.allowed_http_origins]
         if not self.execution_slots and not self.score_slots:
             raise ValueError("at least one execution or score slot is required")

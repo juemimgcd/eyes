@@ -1,0 +1,37 @@
+# Opt in after building matching control/frontend and Gateway images.
+# Merge after compose.yaml (and compose.cloud.yaml when used).
+services:
+  api:
+    environment:
+      EYES_TUNNEL_ENABLED: "true"
+      EYES_TUNNEL_GATEWAY_URL: http://gateway:8090
+  gateway:
+    image: ${EYES_GATEWAY_IMAGE:-eyes-gateway:local}
+    build:
+      context: ..
+      dockerfile: tunnel/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, --spider, http://127.0.0.1:8090/health/live]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    # No published port: /invoke is accessible only on the Compose network.
+  tunnel-runner:
+    profiles: [tunnel-runner]
+    image: ${EYES_CONTROL_IMAGE:-eyes-control:local}
+    command: [eyes-runner, --config, /app/tunnel-runner.toml, run]
+    environment:
+      EYES_RUNNER_TOKEN: ${EYES_TUNNEL_RUNNER_TOKEN:-}
+    volumes:
+      - ./tunnel-runner.example.toml:/app/tunnel-runner.toml:ro
+      - tunnel-runner:/app/data/tunnel-runner
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  tunnel-runner:

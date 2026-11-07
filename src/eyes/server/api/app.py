@@ -21,6 +21,7 @@ from eyes.server.event_queue.routes import router as event_queue_router
 from eyes.server.evidence.service import LocalArtifactStore
 from eyes.server.observation.routes import router as observation_router
 from eyes.server.pairing.routes import router as pairing_router
+from eyes.server.pairing.tunnel import router as tunnel_router
 from eyes.server.realtime.cache import SummaryCache
 from eyes.server.realtime.hub import UpdateHub
 from eyes.server.realtime.routes import router as realtime_router
@@ -66,6 +67,7 @@ def create_app(settings: Settings | None = None):
     app.include_router(realtime_router)
     app.include_router(discovery_router)
     app.include_router(pairing_router)
+    app.include_router(tunnel_router)
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):

@@ -15,15 +15,18 @@ class PairingCreate(Contract):
 class PairingRedeem(Contract):
     code: str = Field(pattern=r"^[A-Za-z0-9_-]{32}$")
     token: str = Field(pattern=r"^eyes_[A-Za-z0-9_-]{43}$")
-    adapter: Literal["python", "http"]
+    adapter: Literal["python", "http", "tunnel"]
     url: str | None = Field(default=None, max_length=2000)
     output_pointer: str = Field(default="", max_length=1000)
     secret_refs: dict[str, str] = Field(default_factory=dict, max_length=30)
 
+    protocol: Literal["json", "chat_completions"] = "json"
+    observation_token: str | None = Field(default=None, pattern=r"^eyes_obs_[A-Za-z0-9_-]{43}$")
+
     @model_validator(mode="after")
     def validate_connection(self):
         # An HTTP binding without a URL cannot execute; Python must not smuggle HTTP config.
-        if self.adapter == "http":
+        if self.adapter in {"http", "tunnel"}:
             if self.url is None:
                 raise ValueError("HTTP connection requires url")
             http_origin(self.url)
@@ -40,4 +43,12 @@ class PairingRedeem(Contract):
             raise ValueError("secrets must reference local environment variable names")
         if self.adapter == "http" and set(self.secret_refs) - {"agent_auth"}:
             raise ValueError("HTTP connection only accepts agent_auth")
+        # Tunnel secrets stay on the client; separate telemetry credentials are mandatory.
+        if self.adapter == "tunnel":
+            if self.secret_refs or not self.observation_token:
+                raise ValueError(
+                    "tunnel requires observation_token and no remote secret references"
+                )
+        elif self.observation_token or self.protocol != "json":
+            raise ValueError("protocol and observation_token apply only to tunnel connections")
         return self

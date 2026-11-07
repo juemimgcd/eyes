@@ -1,5 +1,7 @@
 # 从 Agent 所在机器主动连接 Eyes
 
+已有 HTTP Agent 若希望免安装 Python 和 Eyes 包，可使用 [Go 隧道接入](tunnel.md)。下文保留原有 Python/HTTP Runner 接入说明。
+
 适用于公网 Eyes 评测用户本机或内网中的可信 Agent。连接进程复用现有 Runner，通过出站 HTTPS 领取任务、续租和上传证据；不要求 Agent 暴露入站端口，不创建隧道。连接进程必须保持运行，机器休眠或进程停止时不能领取新任务。
 
 ## 首次连接
