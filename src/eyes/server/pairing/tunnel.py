@@ -29,6 +29,9 @@ def session_status(session: Database, user: TunnelIdentity):
 @router.post("/authorize/{pairing_id}")
 def authorize(pairing_id: UUID, session: Database, user: RunnerIdentity):
     item = scoped(session, AgentPairing, pairing_id, user.project_id)
+    # A project Runner must never invoke an observation-only connection.
+    if item.purpose != "evaluate":
+        raise DomainError(403, "observation_only", "this connection does not allow evaluation")
     credential = session.get(Credential, item.credential_id) if item.credential_id else None
     if item.revoked or credential is None or credential.revoked or credential.role != "tunnel":
         raise DomainError(401, "tunnel_revoked", "tunnel connection is unavailable")

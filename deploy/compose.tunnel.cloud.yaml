@@ -1,0 +1,14 @@
+# Production: merge after compose.yaml, compose.cloud.yaml and compose.tunnel.yaml.
+# Persistent project credentials/configuration are provisioned once on the host.
+services:
+  gateway:
+    image: ${EYES_GATEWAY_IMAGE:?Set EYES_GATEWAY_IMAGE}
+    build: !reset null
+  tunnel-runner:
+    profiles: !reset []
+    image: ${EYES_CONTROL_IMAGE:?Set EYES_CONTROL_IMAGE}
+    environment: !reset {}
+    env_file: /opt/eyes/tunnel/runner.env
+    volumes: !override
+      - /opt/eyes/tunnel/runner.toml:/app/tunnel-runner.toml:ro
+      - tunnel-runner:/app/data/tunnel-runner

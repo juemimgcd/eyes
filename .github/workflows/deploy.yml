@@ -59,6 +59,15 @@ jobs:
           tags: ghcr.io/juemimgcd/eyes-frontend:${{ github.sha }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+      - name: Publish gateway and connector images
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: tunnel/Dockerfile
+          push: true
+          tags: ghcr.io/juemimgcd/eyes-gateway:${{ github.sha }}
+          cache-from: type=gha,scope=gateway
+          cache-to: type=gha,scope=gateway,mode=max
       - name: Configure SSH
         env:
           SSH_KEY: ${{ secrets.EYES_DEPLOY_SSH_KEY }}
@@ -76,12 +85,14 @@ jobs:
           release="/opt/eyes/releases/$REVISION"
           control="ghcr.io/juemimgcd/eyes-control:$REVISION"
           frontend="ghcr.io/juemimgcd/eyes-frontend:$REVISION"
+          gateway="ghcr.io/juemimgcd/eyes-gateway:$REVISION"
           docker pull --platform linux/amd64 "$control"
           docker pull --platform linux/amd64 "$frontend"
+          docker pull --platform linux/amd64 "$gateway"
           ssh eyes-deploy@124.223.14.145 "mkdir -p '$release'"
-          printf 'EYES_CONTROL_IMAGE=ghcr.io/juemimgcd/eyes-control:%s\nEYES_FRONTEND_IMAGE=ghcr.io/juemimgcd/eyes-frontend:%s\n' "$REVISION" "$REVISION" > deploy/images.env
-          scp deploy/compose.yaml deploy/compose.cloud.yaml deploy/release.sh deploy/images.env "eyes-deploy@124.223.14.145:$release/"
-          docker save "$control" "$frontend" > "$RUNNER_TEMP/eyes-images.tar"
+          printf 'EYES_CONTROL_IMAGE=ghcr.io/juemimgcd/eyes-control:%s\nEYES_FRONTEND_IMAGE=ghcr.io/juemimgcd/eyes-frontend:%s\nEYES_GATEWAY_IMAGE=ghcr.io/juemimgcd/eyes-gateway:%s\n' "$REVISION" "$REVISION" "$REVISION" > deploy/images.env
+          scp deploy/compose.yaml deploy/compose.cloud.yaml deploy/compose.tunnel.yaml deploy/compose.tunnel.cloud.yaml deploy/release.sh deploy/images.env "eyes-deploy@124.223.14.145:$release/"
+          docker save "$control" "$frontend" "$gateway" > "$RUNNER_TEMP/eyes-images.tar"
           mkdir "$RUNNER_TEMP/eyes-images"
           tar -xf "$RUNNER_TEMP/eyes-images.tar" -C "$RUNNER_TEMP/eyes-images"
           rsync --recursive --checksum --compress --delete-delay --stats "$RUNNER_TEMP/eyes-images/" eyes-deploy@124.223.14.145:/opt/eyes/image-cache/

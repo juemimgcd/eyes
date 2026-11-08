@@ -10,6 +10,7 @@ from eyes.contracts.target import http_origin
 
 class PairingCreate(Contract):
     name: str = Field(min_length=1, max_length=200)
+    purpose: Literal["observe", "evaluate"] = "evaluate"
 
 
 class PairingRedeem(Contract):
@@ -27,9 +28,10 @@ class PairingRedeem(Contract):
     def validate_connection(self):
         # An HTTP binding without a URL cannot execute; Python must not smuggle HTTP config.
         if self.adapter in {"http", "tunnel"}:
-            if self.url is None:
+            if self.adapter == "http" and self.url is None:
                 raise ValueError("HTTP connection requires url")
-            http_origin(self.url)
+            if self.url is not None:
+                http_origin(self.url)
             if self.output_pointer and not self.output_pointer.startswith("/"):
                 raise ValueError("output_pointer must be a JSON Pointer")
         elif self.url is not None or self.output_pointer:

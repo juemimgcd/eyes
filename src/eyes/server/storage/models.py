@@ -406,6 +406,10 @@ class ComparisonReport(Record):
 
 class AgentPairing(Record):
     __tablename__ = "agent_pairings"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('observe', 'evaluate')", name="ck_pairing_purpose"),
+    )
+    purpose: Mapped[str] = mapped_column(String(20), default="evaluate", server_default="evaluate")
     project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     code_digest: Mapped[str] = mapped_column(String(64), unique=True)
