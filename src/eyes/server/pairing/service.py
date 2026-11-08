@@ -27,6 +27,8 @@ def view(session, item):
     return {
         "id": item.id,
         "name": item.name,
+        "purpose": item.purpose,
+        "observation_source_id": item.observation_source_id,
         "expires_at": item.expires_at,
         "status": status,
         "target_version_id": item.target_version_id,
@@ -41,6 +43,7 @@ def create(session, user, request):
     item = AgentPairing(
         project_id=user.project_id,
         name=request.name,
+        purpose=request.purpose,
         code_digest=hashlib.sha256(code.encode()).hexdigest(),
         expires_at=now() + timedelta(minutes=10),
     )
@@ -58,6 +61,16 @@ def redeem(session, request, gateway_url="http://gateway:8090"):
     # Unknown, expired and revoked codes cannot grant access to a project.
     if item is None or item.revoked:
         raise DomainError(401, "pairing_unavailable", "pairing code is invalid or revoked")
+    # Observation-only pairings must not be redeemed into a task-executing Runner.
+    if item.purpose == "observe" and request.adapter != "tunnel":
+        raise DomainError(
+            422, "observation_connector_required", "use the unified observation connector"
+        )
+    # Evaluation needs a callable endpoint; observation-only connections do not.
+    if item.purpose == "evaluate" and request.adapter == "tunnel" and request.url is None:
+        raise DomainError(
+            422, "task_endpoint_required", "evaluation requires an Agent HTTP endpoint"
+        )
     # Existing Python/HTTP redemption fingerprints predate the tunnel-only fields.
     fingerprint = digest(
         request.model_dump(
@@ -97,37 +110,40 @@ def redeem(session, request, gateway_url="http://gateway:8090"):
         }
         source = ObservationSource(
             project_id=item.project_id,
-            name=item.name[:190] + " · 模型通信",
+            name=item.name,
             token_digest=hashlib.sha256(request.observation_token.encode()).hexdigest(),
         )
         session.add(source)
         session.flush()
         item.observation_source_id = source.id
-    target = publish(
-        session,
-        item.project_id,
-        TargetPublish(
-            name=item.name,
-            capabilities=TargetCapabilities(
-                adapter="http" if request.adapter == "tunnel" else request.adapter,
-                session_isolation=False,
-                environment_isolation=False,
-                observation=["task", "sdk"] if request.adapter == "python" else ["task"],
+    target = None
+    if item.purpose == "evaluate":
+        target = publish(
+            session,
+            item.project_id,
+            TargetPublish(
+                name=item.name,
+                capabilities=TargetCapabilities(
+                    adapter="http" if request.adapter == "tunnel" else request.adapter,
+                    session_isolation=False,
+                    environment_isolation=False,
+                    observation=["task", "sdk"] if request.adapter == "python" else ["task"],
+                ),
+                config=config,
+                secret_refs=request.secret_refs,
             ),
-            config=config,
-            secret_refs=request.secret_refs,
-        ),
-    )
+        )
     credential = Credential(
         project_id=item.project_id,
         role="tunnel" if request.adapter == "tunnel" else "runner",
         token_digest=hashlib.sha256(request.token.encode()).hexdigest(),
-        target_ids=[str(target.id)],
+        target_ids=[str(target.id)] if target else [],
         work_kinds=[] if request.adapter == "tunnel" else ["execute"],
     )
     session.add(credential)
     session.flush()
-    item.credential_id, item.target_version_id = credential.id, target.id
+    item.credential_id = credential.id
+    item.target_version_id = target.id if target else None
     item.redemption_digest = fingerprint
     return view(session, item)
 

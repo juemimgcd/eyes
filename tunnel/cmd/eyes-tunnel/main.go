@@ -11,6 +11,7 @@ import (
 
 func main() {
 	var c tunnel.ClientConfig
+	observeOnly := flag.Bool("observe-only", false, "observe model communication without allowing evaluation")
 	flag.StringVar(&c.Server, "server", "", "Eyes API URL")
 	flag.StringVar(&c.Gateway, "gateway", "", "public tunnel URL; defaults to API sibling /tunnel")
 	flag.StringVar(&c.PairCode, "pair-code", "", "short-lived pairing code")
@@ -22,6 +23,10 @@ func main() {
 	flag.StringVar(&c.OutputPointer, "output-pointer", "", "JSON Pointer selecting an output object")
 	dir := flag.String("state-dir", ".eyes/tunnel", "private connection and observation spool directory")
 	flag.Parse()
+	c.Purpose = "evaluate"
+	if *observeOnly {
+		c.Purpose = "observe"
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	if err := tunnel.RunClient(ctx, *dir, c); err != nil {

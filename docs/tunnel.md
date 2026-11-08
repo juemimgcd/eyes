@@ -6,13 +6,30 @@
 
 ## 用户接入
 
-在「目标 Agent → 接入 Agent」选择「HTTP 隧道 · 无需 Python」，填写本地完整任务地址、协议、机器系统。页面生成配对码和下载链接。下载后在 Agent 所在机器运行生成的命令。例如（地址和配对码均为占位）：
+「Agent 观测」与「目标 Agent」的「接入 Agent」共用同一个弹窗、连接列表和独立程序。接入时选择用途：
+
+- **仅观测**：填写 Agent 名称、原 Chat Completions 模型 API 地址和机器系统；不需要 Agent 任务接口。连接程序添加 `--observe-only`，不会启动本地任务转发器，服务端不创建评测目标，并拒绝对此连接发起调用。
+- **允许评测**：另外填写本地完整任务地址与接口协议；填写原模型 API 地址后，同一连接也能采集模型通信，不需要在观测页再次生成令牌。
+
+配对后自动创建同名观测来源；允许评测时也创建同名目标。两页都能查看同一连接的状态和关联观测。用途在创建配对时由服务端保存，不能通过修改客户端命令扩大权限。旧连接默认保留原来的评测用途。
+
+页面生成配对码和下载链接。下载后在 Agent 所在机器运行生成的命令。允许评测示例（地址和配对码均为占位）：
 
 ```sh
 chmod +x eyes-tunnel
 ./eyes-tunnel --server https://example.com/eyes/api \
   --pair-code <页面配对码> --local http://127.0.0.1:9000/run --protocol json
 ```
+
+仅观测示例：
+
+```sh
+./eyes-tunnel --server https://example.com/eyes/api \
+  --pair-code <页面配对码> --observe-only \
+  --model-upstream https://your-model-provider/v1
+```
+
+两种用途在采集模型通信时，都需要将 Agent 的模型 base URL 改为 `http://127.0.0.1:8787/v1`，保留原模型名称和 API Key。在线仅表示连接存活，不代表模型请求已经经过代理。
 
 Windows 下载 `eyes-tunnel.exe`，使用页面生成的 PowerShell 命令。macOS 首版为 Apple Silicon，Linux/Windows 为 amd64。二进制未进行 Apple 签名或公证；下载后的系统信任提示仍需用户处理，不能把跨平台编译称为各平台运行验收。下载目录的 `SHA256SUMS` 可用于核对传输完整性。
 
@@ -54,7 +71,7 @@ Agent 的认证值从用户本地环境变量读取：首次命令添加 `--auth
 
 ## 云端部署
 
-1. 备份数据库并部署同版本 Eyes API、Runner 和前端，执行 `alembic upgrade head`；本次迁移为 `0013_tunnel_connections`。
+1. 备份数据库并部署同版本 Eyes API、Runner 和前端，执行 `alembic upgrade head`；当前迁移为 `0014_connection_purpose`。
 2. 构建 Gateway 镜像：`docker build -f tunnel/Dockerfile -t eyes-gateway:local .`。镜像包含 Gateway、三个客户端和 SHA256 清单。
 3. 将 `deploy/compose.tunnel.yaml` 合并到现有 Compose 文件之后，启用 `EYES_TUNNEL_ENABLED=true`、`EYES_TUNNEL_GATEWAY_URL=http://gateway:8090` 和 Gateway 服务。未启用时界面说明尚未部署，不生成隧道命令。
 4. 云端已有执行 Runner 需要设置 `allowed_http_origins = ["http://gateway:8090"]` 和 `tunnel_gateway_url = "http://gateway:8090"`；保留其原有容量、凭据及评分配置。若 Runner 不在同一 Docker 网络，应配置可达的内部地址，并同步 API 配置。不能给 Gateway 的 `/invoke` 配置公网转发。
@@ -63,7 +80,7 @@ Agent 的认证值从用户本地环境变量读取：首次命令添加 `--auth
 
 Gateway 没有公开第三方调用 API；每次 `/invoke/{pairing_id}` 由控制 API 校验 Runner 的项目、目标和执行权限。隧道连接凭据的 role 为 `tunnel`，不能注册 Runner、领取工作或管理项目。连接约每 10 秒重新鉴权；撤销后禁止新调用，已建立连接最迟在下次鉴权完成时断开，但不证明已经运行的 Agent 停止。控制 API 不可用时断开连接，不继续使用缓存权限。
 
-这是可选部署层，当前生产发布脚本不会自动启用此 overlay 或发布 Gateway 镜像。启用时需将 overlay 纳入实际发布配置；未发布的源码改动不改变现有线上环境。
+本机自托管仍可按需启用此覆盖文件。仓库的生产自动发布会构建、传输同 SHA 的 Gateway 镜像，并额外合并 `compose.tunnel.cloud.yaml`，固定启用 Gateway 与项目 Runner。云端 Runner 的凭据从 `/opt/eyes/tunnel/runner.env` 读取（键为 `EYES_RUNNER_TOKEN`），配置从 `/opt/eyes/tunnel/runner.toml` 挂载。该目录须由部署账号 `eyes-deploy` 拥有、权限 700，凭据文件权限 600；不再通过发布文件或镜像传递项目令牌。现有状态卷继续使用 `eyes_tunnel-runner`。
 
 ## 开发与验证
 
@@ -101,3 +118,31 @@ sh package.sh # dist/tunnel/ 中生成 Gateway、三个客户端、校验清单�
 - 每个活动模型请求独立发送心跳，不再等待历史观测文件上传完成；请求结束或客户端停止时终止对应心跳。
 - 模型响应中的显式 error 独立判定为 failed/ERROR，不再混同于采集受限。
 - 本轮 Ruff、Go build/vet、三个平台重新打包及控制镜像构建通过。未新增测试，未运行真实 Agent、故障注入或端到端联调；未部署线上。
+
+### 2026-11-08 云端启用
+
+在现有 `bd919e2d08f417f9ecb2f5d66949c7728fe927a1` 发布上启用了隧道。Gateway 和三个平台客户端从该提交源码编译；Gateway 镜像为 `eyes-gateway:bd919e2d08f417f9ecb2f5d66949c7728fe927a1`。当前发布目录增加 `compose.tunnel.yaml`，并将该覆盖文件及 Gateway、Runner 纳入当前目录的 `release.sh`。
+
+- API 的 `EYES_TUNNEL_ENABLED=true`，内部 Gateway 地址为 `http://gateway:8090`。
+- `cloud-tunnel-runner` 仅授权个人工作空间 `a3823c04-e2cd-418b-8a8a-8c3bbeca464a`，配置 4 个执行槽、1 个评分槽；凭据和配置保存在服务器 `/opt/eyes/tunnel/`，不入库。新注册账号不会自动获得云端 Runner。
+- `/etc/nginx/snippets/eyes.conf` 增加 WebSocket 入口。API 重建后前端 Nginx 曾缓存旧容器地址，重载前端 Nginx 后公网 readiness 恢复正常。
+- 启用前数据库与配置备份位于 `/opt/eyes/backups/tunnel-enable-20261108T013654Z/`。
+- Gateway 健康检查、Runner 注册与任务轮询、公网 readiness、客户端下载和无凭据连接返回 401 已核对。三个平台客户端及依赖许可从公网下载后的 SHA256 校验均通过；macOS arm64 客户端在本机成功运行 `--help`。没有接入真实 Agent，不代表完整执行、评分及断网恢复验收。
+
+本次是服务器侧启用，尚未修改或发布 GitHub 自动部署工作流。后续 main 自动部署会覆盖发布脚本并使用不含隧道的 Compose 配置，可能关闭 API 隧道开关；再次自动发布前须将 Gateway 构建与隧道覆盖配置纳入仓库部署流程。当前服务设置了 `restart: unless-stopped`，主机重启会恢复现有容器。
+
+
+### 2026-11-08 统一连接入口与用途
+
+新增 `0014_connection_purpose`，历史配对默认保留 `evaluate` 用途；新建观测连接使用 `observe`。仅观测配对只允许统一连接程序兑换，不签发 Runner 执行权限，也不发布目标版本。Gateway 的调用授权明确拒绝仅观测配对。降级迁移会撤销仅观测连接，避免旧代码无法识别该权限边界。
+
+两页使用同一 `AgentConnectDialog`，观测页默认选择仅观测、目标页默认选择允许评测；用户可在配对前切换。原有已埋点 Agent 的来源令牌入口移入观测页高级区；已有来源和令牌保留，不按名称自动合并。旧连接程序和既有评测配置继续兼容，新建仅观测连接需要下载新版程序。
+
+Ruff、前端 lint/TypeScript/构建、Go build/vet、三平台打包及独立 PostgreSQL 全量迁移与 Alembic check 通过。未新增或修改测试；没有真实 Agent 任务、模型上游调用或断网恢复验收。Chrome 自动化环境仍不可用，未声称完成桌面渲染验证。
+
+云端发布目录为 `/opt/eyes/releases/unified-connect-20261108`。API、前端、Gateway 与 Runner 已切换到同一发布批次；公网 readiness 返回 `0014_connection_purpose`，共享弹窗公网文件摘要与本地构建一致，Gateway 内三个客户端的校验清单均通过。现有项目 Runner 正常轮询；未创建新的真实 Agent 接入记录。本次仍为服务器源码快照发布，GitHub main 尚未同步；自动发布前必须同步新迁移、连接代码及隧道发布配置，不应直接使用旧 main 覆盖。
+
+
+### 自动发布衔接
+
+上述源码快照的两处前端改动、用途迁移和统一连接程序现已整理入仓库变更。生产工作流增加 Gateway 镜像发布与传输，发布脚本固定加载云端隧道覆盖文件并复用已有项目 Runner 配置。合并到 main 后将按 SHA 发布；合并前线上仍运行上述快照，不能把 PR 创建等同正式自动部署已完成。

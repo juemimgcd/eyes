@@ -8,7 +8,7 @@ from eyes.server.config import Settings
 from eyes.server.diagnostics import runtime_metrics
 from eyes.server.realtime.transactions import ControlSession
 
-SCHEMA_REVISION = "0013_tunnel_connections"
+SCHEMA_REVISION = "0014_connection_purpose"
 
 
 class MeasuredQueuePool(QueuePool):

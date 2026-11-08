@@ -105,15 +105,22 @@ def runs(
     source_id: UUID | None = None,
     session_id: str | None = None,
 ):
-    query = select(ObservedRun).where(ObservedRun.project_id == user.project_id)
+    query = (
+        select(ObservedRun, ObservationSource.name)
+        .join(ObservationSource, ObservedRun.source_id == ObservationSource.id)
+        .where(ObservedRun.project_id == user.project_id)
+    )
     if source_id:
         query = query.where(ObservedRun.source_id == source_id)
     if session_id:
         query = query.where(ObservedRun.session_id == session_id)
-    values = session.scalars(
+    values = session.execute(
         query.order_by(ObservedRun.created_at.desc(), ObservedRun.id).limit(limit).offset(offset)
     )
-    return {"schema_version": "1.0", "items": [service.summary(run) for run in values]}
+    return {
+        "schema_version": "1.0",
+        "items": [{**service.summary(run), "source_name": name} for run, name in values],
+    }
 
 
 @router.get("/runs/{run_id}")
@@ -121,6 +128,7 @@ def run_detail(
     run_id: UUID, session: Database, user: Reader, limit: Limit = 200, offset: Offset = 0
 ):
     run = scoped(session, ObservedRun, run_id, user.project_id)
+    source = scoped(session, ObservationSource, run.source_id, user.project_id)
     events = session.scalars(
         select(ObservedEvent)
         .where(ObservedEvent.run_id == run.id)
@@ -131,6 +139,7 @@ def run_detail(
     return {
         "schema_version": "1.0",
         **service.summary(run),
+        "source_name": source.name,
         "events": [public_record(event) for event in events],
         "has_more": offset + len(events) < run.metrics.get("events", 0),
     }

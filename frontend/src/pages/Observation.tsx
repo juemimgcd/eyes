@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import {
   Activity,
   ArrowLeft,
@@ -27,6 +32,7 @@ import {
 } from "../components/ui";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { AgentConnectDialog } from "@/components/AgentConnectDialog";
 import { ObservationFlow } from "@/components/ObservationFlow";
 import {
   eventLabels as labels,
@@ -64,6 +70,7 @@ type MetricsData = {
 type ObservedRun = {
   id: string;
   source_id: string;
+  source_name: string;
   external_id: string;
   session_id: string;
   agent: string;
@@ -119,6 +126,8 @@ function Status({ value }: { value: string }) {
 export function ObservationPage() {
   const { api } = useConnection();
   const [setup, setSetup] = useState(false);
+  const [legacySetup, setLegacySetup] = useState(false);
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const pageValue = Number(params.get("page"));
   const page =
@@ -162,6 +171,16 @@ export function ObservationPage() {
         </section>
       ) : (
         <>
+          <details className="mb-4">
+            <summary>已有埋点或旧版上报接入</summary>
+            <p className="muted">
+              已使用 Eyes 事件协议的 Agent
+              可继续管理来源令牌。统一连接程序会自动创建来源，无需在这里重复接入。
+            </p>
+            <Button variant="ghost" onClick={() => setLegacySetup(true)}>
+              管理事件上报来源
+            </Button>
+          </details>
           <div className="observation-toolbar">
             <div className="flex flex-wrap items-center gap-2">
               <Activity size={16} />
@@ -196,7 +215,7 @@ export function ObservationPage() {
               <Empty
                 icon={Terminal}
                 title="等待 Agent 发来第一条任务"
-                description="配置一次接入信息，然后回到 Deta 输入任务。无需测试集、评分器或 Runner。"
+                description="配置观测上报后，在你的 Agent 中执行任务。无需测试集、评分器或 Runner。"
                 action={
                   <Button onClick={() => setSetup(true)}>
                     <Plug data-icon="inline-start" />
@@ -220,11 +239,7 @@ export function ObservationPage() {
                         <ChevronRight size={16} />
                       </Link>
                       <div className="observation-run-meta">
-                        <span>
-                          {sources.data?.items.find(
-                            (s) => s.id === run.source_id,
-                          )?.name || run.agent}
-                        </span>
+                        <span>{run.source_name}</span>
                         <span>{run.model}</span>
                         <button
                           className="text-button"
@@ -266,8 +281,18 @@ export function ObservationPage() {
         </>
       )}
       {setup && (
-        <SourceSetup
+        <AgentConnectDialog
+          defaultPurpose="observe"
           onClose={() => setSetup(false)}
+          onManual={() => {
+            setSetup(false);
+            navigate("/targets");
+          }}
+        />
+      )}
+      {legacySetup && (
+        <SourceSetup
+          onClose={() => setLegacySetup(false)}
           sources={sources.data?.items || []}
           error={sources.error}
           loading={sources.isPending}
@@ -290,7 +315,7 @@ function SourceSetup({
 }) {
   const { api } = useConnection();
   const client = useQueryClient();
-  const [name, setName] = useState("Deta");
+  const [name, setName] = useState("");
   const [created, setCreated] = useState<(Source & { token: string }) | null>(
     null,
   );
@@ -298,7 +323,7 @@ function SourceSetup({
   const [failure, setFailure] = useState<unknown>(null);
   const [copied, setCopied] = useState(false);
   const config = created
-    ? `EYES_OBSERVATION_URL=${window.location.origin}/api\nEYES_OBSERVATION_TOKEN=${created.token}\nEYES_CAPTURE_BODY=true`
+    ? `EYES_OBSERVATION_URL=${new URL(`${import.meta.env.BASE_URL}api`, window.location.origin).href}\nEYES_OBSERVATION_TOKEN=${created.token}\nEYES_CAPTURE_BODY=true`
     : "";
   async function create(event: React.FormEvent) {
     event.preventDefault();
@@ -341,7 +366,7 @@ function SourceSetup({
         {failure != null && <ErrorNotice error={failure} />}
         {created ? (
           <>
-            <h3>将这三行添加到 Deta 的 .env</h3>
+            <h3>为 {created.name} 配置观测上报</h3>
             <p className="muted">
               令牌只显示一次，仅允许上报这个接入的事件。正文采集包含任务、模型输入输出和工具参数；改为
               false 可只采集运行信息。
@@ -349,7 +374,7 @@ function SourceSetup({
             <pre
               className="observation-config"
               tabIndex={0}
-              aria-label="Deta 观测配置"
+              aria-label={`${created.name} 的观测配置`}
             >
               {config}
             </pre>
@@ -368,51 +393,58 @@ function SourceSetup({
               {copied ? "已复制" : "复制配置"}
             </Button>
             <p>
-              在 Deta 项目中运行 <code>uv run --env-file .env deta</code>
-              ，输入任务后回到这里查看。
+              将配置加入 {created.name}{" "}
+              的运行环境，再用它原有的方式启动并执行任务。 若启动程序读取
+              .env，也可保存到该文件。Agent 需要已实现 Eyes
+              事件上报，仅设置环境变量不会自动采集内部调用。
             </p>
             <Button onClick={onClose}>完成</Button>
           </>
         ) : (
           <>
-            <h3>本机自动接入</h3>
+            <h3>配置 Agent 观测上报</h3>
             <p>
-              启动本机 Eyes 后，在 Deta
-              中照常输入任务。首次上报会自动登记，无需创建接入或填写令牌。
+              为接入命名并生成专用配置。Agent 需要实现 Eyes 事件上报；
+              仅提供进程地址或设置环境变量，无法自动观测内部调用。
             </p>
-            <pre className="observation-config">
-              uv run --env-file .env deta -i
-            </pre>
-            <p className="muted">
-              默认连接本机 8000 端口；自定义端口只需设置
-              EYES_OBSERVATION_URL。其他 Agent 仍需接入事件上报。
-            </p>
+            <form onSubmit={(event) => void create(event)}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="source-name">Agent 名称</FieldLabel>
+                  <Input
+                    id="source-name"
+                    value={name}
+                    placeholder="例如：我的编程助手"
+                    maxLength={200}
+                    required
+                    data-autofocus
+                    onChange={(event) => setName(event.target.value)}
+                    disabled={busy}
+                  />
+                  <FieldDescription>
+                    此名称会显示在接入配置、任务列表和运行详情中。
+                  </FieldDescription>
+                </Field>
+              </FieldGroup>
+              <Button type="submit" disabled={busy || !name.trim()}>
+                <Plug data-icon="inline-start" />
+                {busy ? "处理中…" : "生成接入配置"}
+              </Button>
+            </form>
             <details>
-              <summary>远程 Agent 接入</summary>
-              <form onSubmit={(event) => void create(event)}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="source-name">Agent 名称</FieldLabel>
-                    <Input
-                      id="source-name"
-                      value={name}
-                      maxLength={200}
-                      required
-                      data-autofocus
-                      onChange={(event) => setName(event.target.value)}
-                      disabled={busy}
-                    />
-                    <FieldDescription>
-                      Deta 已支持此接入。其他 Agent
-                      需实现事件上报，不能仅凭进程地址观测内部调用。
-                    </FieldDescription>
-                  </Field>
-                </FieldGroup>
-                <Button type="submit" disabled={busy || !name.trim()}>
-                  <Plug data-icon="inline-start" />
-                  {busy ? "处理中…" : "生成接入配置"}
-                </Button>
-              </form>
+              <summary>Deta 接入示例</summary>
+              <p>
+                Deta 已支持 Eyes 事件上报。将生成的配置保存到 Deta 项目的
+                .env，再运行：
+              </p>
+              <pre className="observation-config">
+                uv run --env-file .env deta -i
+              </pre>
+              <p className="muted">
+                连接本机 Eyes 时，Deta
+                也支持本机自动登记；此方式不使用上方创建的接入名称。
+                要使用自定义名称，请使用生成的地址和令牌。
+              </p>
             </details>
             {error && <ErrorNotice error={error} />}
             {loading ? (
@@ -514,7 +546,7 @@ export function ObservationRunPage() {
       </Link>
       <PageHeading
         eyebrow="RUN"
-        title={run.agent}
+        title={run.source_name}
         description={`${run.model} · 会话 ${shortId(run.session_id)} · 每 2 秒更新`}
         action={
           <Button
@@ -580,7 +612,7 @@ export function ObservationRunPage() {
           {run.prompt ||
             (run.capture_body
               ? "继续既有会话，查看下方输入事件。"
-              : "未启用正文采集。可在 Deta 设置 EYES_CAPTURE_BODY=true 后开始新任务。")}
+              : "未启用正文采集。可在 Agent 的上报配置中设置 EYES_CAPTURE_BODY=true 后开始新任务。")}
         </p>
         <div className="observation-run-meta">
           <span>
@@ -638,8 +670,7 @@ export function ObservationRunPage() {
         </Button>
       )}
       <p className="observation-footnote">
-        完整性仅针对本接入声明的事件。事件来自 Deta
-        埋点；不代表未埋点的外部服务内部过程。
+        完整性仅针对本接入声明并实际上传的事件；不代表未接入观测的内部过程或外部服务。
       </p>
     </>
   );
