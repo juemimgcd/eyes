@@ -181,4 +181,4 @@ uv run eyes-ops maintain
 
 ## 云端部署
 
-GitHub main 更新后自动构建镜像并部署到 https://www.mneme.com.cn/eyes/，配置、回退与运维说明见 [云端自动部署](docs/cloud-deployment.md)。
+面向 `main` 的 PR 自动验证代码、数据库迁移、事件链路和三张生产镜像。合并后，Actions 按镜像摘要演练启动，再部署到 https://www.mneme.com.cn/eyes/。检查项、发布顺序和回退步骤见[云端自动部署](docs/cloud-deployment.md)。

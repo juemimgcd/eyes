@@ -1,0 +1,64 @@
+name: Eyes images
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: Push to GHCR after the main branch passes CI
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: control
+            context: .
+            file: deploy/Dockerfile
+          - image: frontend
+            context: frontend
+            file: frontend/Dockerfile
+            build_args: VITE_BASE_PATH=/eyes/
+          - image: gateway
+            context: .
+            file: tunnel/Dockerfile
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        if: inputs.publish
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        id: build
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          build-args: ${{ matrix.build_args }}
+          tags: ghcr.io/${{ github.repository_owner }}/eyes-${{ matrix.image }}:${{ github.sha }}
+          push: ${{ inputs.publish }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max
+      - name: Record published digest
+        if: inputs.publish
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/$IMAGE.digest"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: inputs.publish
+        with:
+          name: image-digest-${{ matrix.image }}
+          path: ${{ runner.temp }}/${{ matrix.image }}.digest
+          if-no-files-found: error
+          overwrite: true

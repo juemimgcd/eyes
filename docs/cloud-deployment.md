@@ -2,7 +2,23 @@
 
 入口：https://www.mneme.com.cn/eyes/。API 地址为 `/eyes/api`。
 
-`main` 每次 push 或手动触发 `Build and deploy Eyes` 后，GitHub Actions 执行 Ruff、前端 ESLint/TypeScript/构建，再将 linux/amd64 后端、前端与 Gateway 镜像发布到 GHCR（Gateway 构建包含 Go vet 和三个平台客户端打包）。镜像以完整 Git SHA 标记；控制端、前端和 Gateway 三张镜像成功发布后，Actions 下载同一提交的镜像，通过 `docker save` 导出并解开归档，使用 rsync 经 SSH 按文件校验同步到 `/opt/eyes/image-cache/`，再由服务器重新打包并通过 `docker load` 导入部署。其他分支不会部署。应用镜像的下载发生在 Actions，避免云服务器下载 GHCR 镜像层时连接重置导致发布失败；传输失败会停止部署。
+## PR 检查与发布门槛
+
+面向 `main` 的 PR 会触发 [Eyes CI](../.github/workflows/ci.yml)。新提交会取消同一 PR 的旧检查。PR 工作流使用只读仓库权限，并行运行以下检查。
+
+- 后端使用与镜像一致的 Python 3.14.7 和 uv 0.12.2，验证锁文件、Ruff 和格式。在临时 PostgreSQL 上从空库迁移到 head，用 `alembic check` 检查 ORM 与迁移的差异。随后用临时 RabbitMQ、Redis 和真实 API 运行已有的事件验证脚本，覆盖鉴权、待消费消息阻止备份、冲突批次回滚、令牌撤销和死信。脚本失败时，Actions 保留已生成的报告和 API 日志 7 天。
+- 前端运行 ESLint。另由[镜像构建矩阵](../.github/workflows/images.yml)并行构建 linux/amd64 后端、前端与 Gateway。前端 Dockerfile 以生产基址 `/eyes/` 运行 TypeScript 和 Vite 构建。Gateway Dockerfile 运行 Go vet，并打包三个平台的客户端。
+- actionlint 与 ShellCheck 检查工作流和发布脚本。Compose 解析生产使用的四份配置；CI 跳过生产 Runner 环境文件的读取，服务器在迁移前用真实文件再次校验。
+
+## 从 main 发布
+
+`main` 收到 push，或在 `main` 手动运行 [Build and deploy Eyes](../.github/workflows/deploy.yml) 时，Actions 先对该提交执行同一套后端、前端 lint 和部署配置检查，再并行构建并推送三个完整 Git SHA 标签的镜像。发布任务将各自的 GHCR digest 交给部署任务。构建任务具有包写权限，部署任务只有包读权限，并负责 SSH 连接。
+
+部署任务先核对本次提交仍是 `main` 顶端，避免手动重跑旧工作流覆盖线上。随后按三个 digest 拉取镜像，打上 Compose 使用的提交标签，在一次性 GitHub runner 上执行空库迁移并启动 API、后台进程、前端和 Gateway，从前端代理访问 readiness。生产项目的 tunnel-runner 使用服务器本地凭据，随正式发布启动。若演练失败，工作流在建立生产 SSH 连接之前停止。
+
+演练通过后，Actions 将归档以 rsync 经 SSH 按层同步，再由服务器执行 `docker load`。镜像下载发生在 Actions，云服务器沿用增量传输链路。生产发布串行运行，正在执行的发布会完成。
+
+`/opt/eyes/image-cache/`，再由服务器重新打包并通过 `docker load` 导入部署。其他分支不会部署。应用镜像的下载发生在 Actions，避免云服务器下载 GHCR 镜像层时连接重置导致发布失败；传输失败会停止部署。
 
 `/opt/eyes/image-cache/` 是可重建的镜像传输缓存，不是数据库备份。rsync 按文件校验内容，复用相同的镜像层，仅传输新增或变化的文件；首次部署没有缓存时需要完整传输。同步结束时仅在此专用缓存目录删除旧版本不再引用的文件，不删除 Docker 镜像或持久化数据卷。服务器需安装 rsync，缓存由 `eyes-deploy` 账号拥有；首次接入现有部署时可先用 `docker save` 导出当前应用镜像，并解开到缓存目录作为基线，减少首次传输量。
 
@@ -10,18 +26,18 @@
 
 - 后端先按 `pyproject.toml`、`uv.lock` 安装第三方依赖，再复制 README 和源码并安装 Eyes。仅修改源码或 README 不会使依赖安装层失效；uv 可执行文件仅在构建时临时挂载，下载缓存使用 BuildKit cache mount，两者均不进入运行镜像。容器内直接使用 `eyes-*`、`alembic`、`python` 等已安装命令，不使用 `uv run`。
 - Gateway 与三个平台的连接程序去除调试符号，Gateway 程序与客户端下载目录分别保存为镜像层。只修改 Gateway 时，可复用未变化的客户端下载层。
-- Actions 将准备镜像、传输、导入发布拆成独立步骤；`docker save` 通过管道直接解开到按层缓存目录，不在 Actions 临时目录额外保存完整 tar。传输步骤输出进度和统计，便于区分构建慢、下载慢及 SSH 传输慢。镜像层已压缩，不再对传输重复启用压缩。
+- Actions 将准备镜像、部署演练、传输、导入发布拆成独立步骤；`docker save` 通过管道直接解开到按层缓存目录，不在 Actions 临时目录额外保存完整 tar。传输步骤输出进度和统计，便于区分构建慢、下载慢及 SSH 传输慢。镜像层已压缩，不再对传输重复启用压缩。
 - 传输中断时，rsync 将未完成文件保存在缓存内的 `.rsync-partial/` 目录。重跑同一提交可使用已完成层及保留的部分文件继续传输，完成后才导入镜像；打包导入时排除断点目录。该目录仅供部署账号使用，不是可直接部署的镜像，也不是业务数据。
 - 以上优化减少传输量和中断后的重复工作，不保证提高 GitHub 与服务器之间的公网带宽。若新增大层仍长期低速，应接入经过验证的国内仓库或传输节点；仅重试 `docker pull`、更换 DNS 或增加超时时间不构成链路修复。
 
 ## 服务器布局
 
 - `/opt/eyes/.env`：数据库和 RabbitMQ 密码，权限 600，不进入 Git。
-- `/opt/eyes/releases/<sha>/`：Compose、部署脚本及镜像引用。
+- `/opt/eyes/releases/<sha>/`：Compose、部署脚本、镜像引用 `images.env` 和三个 GHCR 来源摘要 `image-digests.txt`。
 - `/opt/eyes/tunnel/runner.env`：现有项目 Runner 的 `EYES_RUNNER_TOKEN`，权限 600。
 - `/opt/eyes/tunnel/runner.toml`：项目 Runner 配置，使用内部 Gateway 地址。该目录由部署账号 `eyes-deploy` 拥有，权限 700。
 - `/opt/eyes/current`：最近一次通过本机健康检查的部署目录。
-- `/opt/eyes/backups/`：已有数据库在迁移前生成的 pg_dump 备份。
+- `/opt/eyes/backups/`：每次迁移前生成的 pg_dump 备份，包括首次发布或首次发布失败后的重试。写入使用权限 600 的临时文件，pg_dump 成功后才改名为 `.dump`。
 - Docker 项目名 `eyes`，PostgreSQL、RabbitMQ、产物使用持久化卷。
 - 只有前端映射到 `127.0.0.1:8180`，数据库、消息队列和 API 无宿主机公开端口。
 - 现有 HTTPS Nginx 引入 `deploy/nginx-eyes.conf`；转发时剥离 `/eyes/` 前缀。前端构建基址和 BrowserRouter 为 `/eyes/`，FastAPI root_path 为 `/eyes/api`。
@@ -30,7 +46,7 @@
 
 ## 部署顺序与失败处理
 
-应用镜像导入完成后，部署使用文件锁串行执行：仅拉取本机缺失的镜像 → 启动依赖 → 备份已有数据库 → Alembic upgrade head → 更新 API/后台进程/前端 → 本机 ready 检查 → 更新 current → 公网 ready 检查。PostgreSQL、Redis、RabbitMQ 缺失或更换版本时仍需服务器访问其镜像仓库。迁移失败会停止流程；更新后的健康检查失败会令 Actions 失败，不会自动回滚数据库。Compose 更新有短暂中断，不保证零停机。
+应用镜像导入完成后，部署使用文件锁串行执行：仅拉取本机缺失的镜像 → 启动依赖 → 备份数据库 → Alembic upgrade head → 更新 API/后台进程/前端 → 本机 ready 检查 → 原子替换 current 链接 → Actions 从公网检查 ready。PostgreSQL、Redis、RabbitMQ 缺失或更换版本时仍需服务器访问其镜像仓库。迁移失败会停止流程；本机检查失败时 current 保留上次成功的指向，但 Compose 可能已经更新部分容器。公网探测失败会令 Actions 报错，此时本机已切换。两种情况均需核对实际容器、数据库版本和入口。Compose 更新有短暂中断，不保证零停机。
 
 此前成功部署目录和数据库备份保留。需要回退时先确认数据库迁移向后兼容，再在对应 release 目录运行 `bash release.sh`；不兼容迁移须人工恢复数据库及一致的产物卷。自动备份只覆盖 PostgreSQL，完整灾备还须保存 artifacts 卷；本流程不会自动删除备份或数据卷。
 

@@ -1,0 +1,128 @@
+name: Eyes CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eyes-checks-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  backend:
+    name: Backend and event delivery
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: eyes
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: eyes
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U eyes -d eyes"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4.9-alpine
+        ports: [6379:6379]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:4.4.0-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: eyes
+          RABBITMQ_DEFAULT_PASS: ci
+        ports: [5672:5672]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      EYES_DATABASE_URL: postgresql+psycopg://eyes:ci@127.0.0.1:5432/eyes
+      EYES_REDIS_URL: redis://127.0.0.1:6379/0
+      EYES_RABBITMQ_URL: amqp://eyes:ci@127.0.0.1:5672/%2F
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: 0.12.2
+          python-version: 3.14.7
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked dependencies and check Python
+        run: |
+          uv sync --locked
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+      - name: Apply migrations and check schema drift
+        run: |
+          uv run --no-sync alembic upgrade head
+          uv run --no-sync alembic check
+      - name: Validate event delivery through the API and broker
+        run: uv run --no-sync python scripts/validate_event_boundaries.py --output "$RUNNER_TEMP/events"
+      - name: Collect event validation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: event-diagnostics-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/events/report.json
+            ${{ runner.temp }}/events/api-*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  frontend:
+    name: Frontend lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
+  deployment:
+    name: Workflows and production Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Lint Actions and release script
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 .github/workflows/*.yml
+          shellcheck deploy/release.sh
+      - name: Resolve the four production Compose files
+        working-directory: deploy
+        env:
+          POSTGRES_PASSWORD: ci
+          RABBITMQ_PASSWORD: ci
+          EYES_CONTROL_IMAGE: eyes-control:ci
+          EYES_FRONTEND_IMAGE: eyes-frontend:ci
+          EYES_GATEWAY_IMAGE: eyes-gateway:ci
+        run: |
+          docker compose -f compose.yaml -f compose.cloud.yaml -f compose.tunnel.yaml \
+            -f compose.tunnel.cloud.yaml config --no-env-resolution --quiet
+
+  images:
+    name: Production Dockerfiles
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/images.yml
