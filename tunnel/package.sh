@@ -3,10 +3,10 @@
 set -eu
 output=${1:-../dist/tunnel}
 mkdir -p "$output/downloads"
-go build -trimpath -o "$output/eyes-gateway" ./cmd/eyes-gateway
-CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$output/downloads/eyes-tunnel-darwin-arm64" ./cmd/eyes-tunnel
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$output/downloads/eyes-tunnel-linux-amd64" ./cmd/eyes-tunnel
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o "$output/downloads/eyes-tunnel-windows-amd64.exe" ./cmd/eyes-tunnel
+go build -trimpath -ldflags='-s -w' -o "$output/eyes-gateway" ./cmd/eyes-gateway
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o "$output/downloads/eyes-tunnel-darwin-arm64" ./cmd/eyes-tunnel
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$output/downloads/eyes-tunnel-linux-amd64" ./cmd/eyes-tunnel
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$output/downloads/eyes-tunnel-windows-amd64.exe" ./cmd/eyes-tunnel
 # Ship license notices with binaries, including transitive module notices.
 notice="$output/downloads/THIRD_PARTY_LICENSES.txt"
 printf 'Eyes tunnel dependency licenses\n' > "$notice"

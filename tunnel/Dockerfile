@@ -6,7 +6,8 @@ COPY tunnel/ ./
 RUN CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 sh package.sh /out
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates && adduser -D -u 10001 eyes
-COPY --from=build /out /app
+COPY --from=build /out/downloads /app/downloads
+COPY --from=build /out/eyes-gateway /app/eyes-gateway
 USER eyes
 ENTRYPOINT ["/app/eyes-gateway"]
 CMD ["--listen", "0.0.0.0:8090", "--api", "http://api:8000", "--downloads", "/app/downloads"]

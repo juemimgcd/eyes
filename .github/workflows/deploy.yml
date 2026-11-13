@@ -77,7 +77,7 @@ jobs:
           printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Deploy exact commit
+      - name: Prepare release and image archive
         env:
           REVISION: ${{ github.sha }}
         run: |
@@ -95,7 +95,15 @@ jobs:
           docker save "$control" "$frontend" "$gateway" > "$RUNNER_TEMP/eyes-images.tar"
           mkdir "$RUNNER_TEMP/eyes-images"
           tar -xf "$RUNNER_TEMP/eyes-images.tar" -C "$RUNNER_TEMP/eyes-images"
-          rsync --recursive --checksum --compress --delete-delay --stats "$RUNNER_TEMP/eyes-images/" eyes-deploy@124.223.14.145:/opt/eyes/image-cache/
-          ssh eyes-deploy@124.223.14.145 'set -euo pipefail; tar -C /opt/eyes/image-cache -cf - . | docker load'
+      - name: Transfer changed image layers
+        run: |
+          rsync --recursive --checksum --partial-dir=.rsync-partial --delete-delay --info=progress2 --stats "$RUNNER_TEMP/eyes-images/" eyes-deploy@124.223.14.145:/opt/eyes/image-cache/
+      - name: Import and deploy exact commit
+        env:
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          release="/opt/eyes/releases/$REVISION"
+          ssh eyes-deploy@124.223.14.145 'set -euo pipefail; tar --exclude=.rsync-partial -C /opt/eyes/image-cache -cf - . | docker load'
           ssh eyes-deploy@124.223.14.145 "bash '$release/release.sh'"
           curl --fail --silent --show-error https://www.mneme.com.cn/eyes/api/health/ready
