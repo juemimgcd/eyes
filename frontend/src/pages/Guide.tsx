@@ -14,9 +14,7 @@ export function GuidePage() {
   return (
     <>
       <PageHeading
-        eyebrow="GETTING STARTED / 接入指南"
-        title="从目标到证据"
-        description="准备控制后端与 Runner，用一场真实实验建立完整记录。"
+        title="接入指南"
         action={
           <Link to="/experiments" className="button primary">
             前往实验
@@ -53,7 +51,7 @@ export function GuidePage() {
               </h2>
               <p>
                 注册后会自动创建个人工作空间。登录后发布目标、测试集和评分器，
-                实验与观测记录仅属于当前账号。右上角“账号设置”可以查看账号或退出登录。
+                实验与观测记录仅属于当前账号。点击侧栏底部的用户名，可以查看账号或退出登录。
               </p>
               <div className="guide-links">
                 <Link to="/targets">
@@ -121,7 +119,6 @@ export function GuidePage() {
           <div className="guide-divider" />
           <Code2 size={20} />
           <h3>开发者接口</h3>
-          <p>交互文档和 OpenAPI 由控制 API 提供。</p>
           <a href="/api/docs" target="_blank" rel="noreferrer">
             API 文档
             <ArrowUpRight size={14} />
@@ -130,9 +127,6 @@ export function GuidePage() {
             OpenAPI Schema
             <ArrowUpRight size={14} />
           </a>
-          <p className="muted">
-            完整本地说明见项目 docs/backend.md 和 docs/agent-integration.md。
-          </p>
         </aside>
       </div>
     </>

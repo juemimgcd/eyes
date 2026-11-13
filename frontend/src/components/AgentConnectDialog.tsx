@@ -140,278 +140,290 @@ export function AgentConnectDialog({
       subtitle="同一个连接程序，按用途选择权限。配对后自动关联名称与观测来源。"
       onClose={() => void finish()}
     >
-      <form className="form" onSubmit={create}>
-        <Field
-          label="Agent 名称"
-          hint="观测记录、连接状态和评测目标共用此名称。"
-        >
-          <input
-            required
-            maxLength={200}
-            value={name}
-            disabled={busy || !!pairing}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Field>
-        <Field label="接入用途">
-          <select
-            value={purpose}
-            disabled={busy || !!pairing}
-            onChange={(e) => setPurpose(e.target.value as Purpose)}
-          >
-            <option value="observe">仅观测 · Agent 自己执行</option>
-            <option value="evaluate">允许评测 · Eyes 可发起任务</option>
-          </select>
-        </Field>
-        <p className="muted">
-          {purpose === "observe"
-            ? "只上传经过模型代理的通信，不开放任务调用接口，也不授予 Eyes 执行权限。"
-            : "连接到指定任务接口后，Eyes 可通过实验发起任务；填写下方模型地址可同时开启观测，无需再次接入。"}
-        </p>
-        {purpose === "evaluate" && (
-          <>
+      <div className="connect-body">
+        <form className="connect-form" onSubmit={create}>
+          <div className="connect-fields">
             <Field
-              label="Agent 任务接口"
-              hint="填写 Agent 所在机器可访问的完整 HTTP 地址。此地址接收评测任务，不是模型 API 地址。"
+              label="Agent 名称"
+              hint="观测记录、连接状态和评测目标共用此名称。"
             >
               <input
                 required
-                type="url"
-                placeholder="http://127.0.0.1:9000/run"
-                value={url}
+                maxLength={200}
+                value={name}
                 disabled={busy || !!pairing}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => setName(e.target.value)}
               />
             </Field>
             <Field
-              label="任务接口协议"
-              hint="测试用例输入须符合该接口的请求格式。"
+              label="接入用途"
+              hint={
+                purpose === "observe"
+                  ? "仅上传模型通信，Agent 自己执行任务。"
+                  : "允许 Eyes 调用任务接口；可同时开启模型观测。"
+              }
             >
               <select
-                value={protocol}
+                value={purpose}
                 disabled={busy || !!pairing}
-                onChange={(e) => setProtocol(e.target.value)}
+                onChange={(e) => setPurpose(e.target.value as Purpose)}
               >
-                <option value="json">HTTP JSON</option>
-                <option value="chat_completions">
-                  Chat Completions · 支持 SSE
-                </option>
+                <option value="observe">仅观测 · Agent 自己执行</option>
+                <option value="evaluate">允许评测 · Eyes 可发起任务</option>
               </select>
             </Field>
-          </>
-        )}
-        <Field
-          label={
-            purpose === "observe"
-              ? "原模型 API 地址"
-              : "原模型 API 地址（可选，同时开启观测）"
-          }
-          hint="填写 Agent 当前使用的 Chat Completions API 根地址。连接后，将 Agent 的模型 base URL 改为 http://127.0.0.1:8787/v1，保留原模型名称与 API Key。"
-        >
-          <input
-            type="url"
-            required={purpose === "observe"}
-            value={modelUpstream}
-            placeholder="https://模型服务地址/v1"
-            disabled={busy || !!pairing}
-            onChange={(e) => setModelUpstream(e.target.value)}
-          />
-        </Field>
-        <p className="muted">
-          模型观测会上传请求与响应正文，仅覆盖经过代理的通信；不会自动获得工具真实执行过程。
-        </p>
-        <Field label="Agent 所在机器的系统">
-          <select
-            value={platform}
-            disabled={busy || !!pairing}
-            onChange={(e) => setPlatform(e.target.value)}
-          >
-            <option value="darwin-arm64">macOS · Apple Silicon</option>
-            <option value="linux-amd64">Linux · amd64</option>
-            <option value="windows-amd64">Windows · amd64（PowerShell）</option>
-          </select>
-        </Field>
-        <p className="muted">
-          下载连接程序并在 Agent 机器上保持运行，无需安装 Python 或 Eyes
-          包。每个 Agent 使用独立目录保存连接状态。
-        </p>
-        {tunnelConfig.isPending && <p role="status">正在检查连接服务…</p>}
-        {tunnelConfig.error && (
-          <ErrorNotice
-            error={tunnelConfig.error}
-            retry={() => void tunnelConfig.refetch()}
-          />
-        )}
-        {tunnelConfig.data && !tunnelConfig.data.enabled && (
-          <p role="status">管理员尚未启用连接服务。</p>
-        )}
-        {!!error && <ErrorNotice error={error} />}
-        {!pairing && (
-          <div className="form-actions">
-            <button
-              className="button primary"
-              disabled={busy || !name.trim() || !tunnelConfig.data?.enabled}
-            >
-              {busy ? "正在生成…" : "生成连接命令"}
-            </button>
           </div>
-        )}
-        {pairing && (
-          <>
-            <p role="status">
-              {labels[current!.status]}
-              {current?.status === "pending" &&
-                ` · 配对码有效期至 ${formatDate(pairing.expires_at)}`}
-            </p>
-            {current?.status === "pending" && (
-              <>
-                <p>
-                  <a className="text-link" href={download} download={binary}>
-                    下载 {binary}
-                  </a>
-                  {!windows && (
-                    <>
-                      {" "}
-                      · 下载后先运行 <code>chmod +x eyes-tunnel</code>
-                    </>
-                  )}
-                </p>
-                <Field
-                  label="连接命令"
-                  hint="配对码只能绑定一个连接，请勿分享。关闭后不再显示配对码。"
+          {purpose === "evaluate" && (
+            <div className="connect-fields">
+              <Field
+                label="Agent 任务接口"
+                hint="填写 Agent 所在机器可访问的完整 HTTP 地址。此地址接收评测任务，不是模型 API 地址。"
+              >
+                <input
+                  required
+                  type="url"
+                  placeholder="http://127.0.0.1:9000/run"
+                  value={url}
+                  disabled={busy || !!pairing}
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </Field>
+              <Field
+                label="任务接口协议"
+                hint="测试用例输入须符合该接口的请求格式。"
+              >
+                <select
+                  value={protocol}
+                  disabled={busy || !!pairing}
+                  onChange={(e) => setProtocol(e.target.value)}
                 >
-                  <textarea
-                    readOnly
-                    rows={4}
-                    value={command}
-                    aria-label="连接命令"
-                  />
-                </Field>
+                  <option value="json">HTTP JSON</option>
+                  <option value="chat_completions">
+                    Chat Completions · 支持 SSE
+                  </option>
+                </select>
+              </Field>
+            </div>
+          )}
+          <Field
+            label={
+              purpose === "observe"
+                ? "原模型 API 地址"
+                : "原模型 API 地址（可选，同时开启观测）"
+            }
+            hint="填写当前使用的 Chat Completions API 根地址。连接后将模型 base URL 改为 http://127.0.0.1:8787/v1，保留原模型名称与 API Key。"
+          >
+            <input
+              type="url"
+              required={purpose === "observe"}
+              value={modelUpstream}
+              placeholder="https://模型服务地址/v1"
+              disabled={busy || !!pairing}
+              onChange={(e) => setModelUpstream(e.target.value)}
+            />
+          </Field>
+          <p className="connect-scope">
+            模型观测会上传经过代理的请求与响应正文。工具执行过程需由 Agent
+            单独上报。
+          </p>
+          <Field
+            label="Agent 所在机器的系统"
+            hint="在 Agent 所在机器持续运行连接程序，无需安装 Python 或 Eyes 包。每个 Agent 使用独立目录保存连接状态。"
+          >
+            <select
+              value={platform}
+              disabled={busy || !!pairing}
+              onChange={(e) => setPlatform(e.target.value)}
+            >
+              <option value="darwin-arm64">macOS · Apple Silicon</option>
+              <option value="linux-amd64">Linux · amd64</option>
+              <option value="windows-amd64">
+                Windows · amd64（PowerShell）
+              </option>
+            </select>
+          </Field>
+          {tunnelConfig.isPending && <p role="status">正在检查连接服务…</p>}
+          {tunnelConfig.error && (
+            <ErrorNotice
+              error={tunnelConfig.error}
+              retry={() => void tunnelConfig.refetch()}
+            />
+          )}
+          {tunnelConfig.data && !tunnelConfig.data.enabled && (
+            <p role="status">管理员尚未启用连接服务。</p>
+          )}
+          {!!error && <ErrorNotice error={error} />}
+          {!pairing && (
+            <div className="connect-actions">
+              <button
+                className="button primary"
+                disabled={busy || !name.trim() || !tunnelConfig.data?.enabled}
+              >
+                {busy ? "正在生成…" : "生成连接命令"}
+              </button>
+            </div>
+          )}
+          {pairing && (
+            <>
+              <p role="status">
+                {labels[current!.status]}
+                {current?.status === "pending" &&
+                  ` · 配对码有效期至 ${formatDate(pairing.expires_at)}`}
+              </p>
+              {current?.status === "pending" && (
+                <>
+                  <p>
+                    <a className="text-link" href={download} download={binary}>
+                      下载 {binary}
+                    </a>
+                    {!windows && (
+                      <>
+                        {" "}
+                        · 下载后先运行 <code>chmod +x eyes-tunnel</code>
+                      </>
+                    )}
+                  </p>
+                  <Field
+                    label="连接命令"
+                    hint="配对码只能绑定一个连接，请勿分享。关闭后不再显示配对码。"
+                  >
+                    <textarea
+                      readOnly
+                      rows={4}
+                      value={command}
+                      aria-label="连接命令"
+                    />
+                  </Field>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => void copy()}
+                  >
+                    {copied ? "已复制" : "复制命令"}
+                  </button>
+                </>
+              )}
+              {current?.observation_source_id && (
+                <p>
+                  已关联观测来源，无需再创建令牌。
+                  <Link
+                    className="text-link"
+                    to={`/observe?source=${current.observation_source_id}`}
+                    onClick={() => void finish()}
+                  >
+                    查看 {current.name} 的观测
+                  </Link>
+                </p>
+              )}
+              {current?.status === "online" || current?.status === "offline" ? (
+                <p>
+                  停止连接程序后，在原目录运行 <code>{executable}</code>{" "}
+                  即可重新连接。在线仅表示连接有活动，不代表已采集模型通信或完成评测。
+                </p>
+              ) : null}
+              {(current?.status === "expired" ||
+                current?.status === "revoked") && (
                 <button
                   type="button"
                   className="button"
-                  onClick={() => void copy()}
+                  onClick={() => {
+                    setPairing(null);
+                    setError(null);
+                  }}
                 >
-                  {copied ? "已复制" : "复制命令"}
+                  重新生成
                 </button>
-              </>
-            )}
-            {current?.observation_source_id && (
-              <p>
-                已关联观测来源，无需再创建令牌。
-                <Link
-                  className="text-link"
-                  to={`/observe?source=${current.observation_source_id}`}
-                  onClick={() => void finish()}
-                >
-                  查看 {current.name} 的观测
-                </Link>
-              </p>
-            )}
-            {current?.status === "online" || current?.status === "offline" ? (
-              <p>
-                停止连接程序后，在原目录运行 <code>{executable}</code>{" "}
-                即可重新连接。在线仅表示连接有活动，不代表已采集模型通信或完成评测。
-              </p>
-            ) : null}
-            {(current?.status === "expired" ||
-              current?.status === "revoked") && (
-              <button
-                type="button"
-                className="button"
-                onClick={() => {
-                  setPairing(null);
-                  setError(null);
-                }}
-              >
-                重新生成
-              </button>
-            )}
-          </>
-        )}
-      </form>
-      <section className="form" aria-label="已创建的连接">
-        <h3>已有连接</h3>
-        <p className="muted">
-          每 3 秒更新，30
-          秒无活动显示离线。撤销同时停用该连接及其观测上报，不代表 Agent
-          已停止。
-        </p>
-        {connections.isPending && <p role="status">正在读取连接…</p>}
+              )}
+            </>
+          )}
+        </form>
         {connections.error && (
           <ErrorNotice
             error={connections.error}
             retry={() => void connections.refetch()}
           />
         )}
-        {connections.data?.items.length === 0 && (
-          <p className="muted">尚未创建连接。</p>
-        )}
-        {connections.data?.items.map((item) => (
-          <div
-            className="flex items-center justify-between gap-4"
-            key={item.id}
-          >
-            <div>
-              <span>
-                {item.name} ·{" "}
-                {item.purpose === "observe" ? "仅观测" : "允许评测"} ·{" "}
-                {labels[item.status]}
-              </span>
-              {item.observation_source_id && (
-                <p>
-                  <Link
-                    className="text-link"
-                    to={`/observe?source=${item.observation_source_id}`}
-                    onClick={() => void finish()}
-                  >
-                    查看观测
-                  </Link>
-                </p>
-              )}
-            </div>
-            {item.status !== "revoked" && item.status !== "expired" && (
-              <button
-                type="button"
-                className="button small"
-                disabled={busy}
-                onClick={() => void revoke(item.id)}
-              >
-                撤销{item.status === "pending" ? "配对码" : "连接"}
-              </button>
+        <details className="connect-disclosure">
+          <summary>配对记录</summary>
+          <div className="connect-history">
+            <p className="muted">
+              每 3 秒更新，30
+              秒无活动显示离线。撤销同时停用该连接及其观测上报，不代表 Agent
+              已停止。
+            </p>
+            {connections.isPending && <p role="status">正在读取配对记录…</p>}
+            {connections.data?.items.length === 0 && (
+              <p className="muted">暂无配对记录。</p>
             )}
+            {connections.data?.items.map((item) => (
+              <div
+                className="flex items-center justify-between gap-4"
+                key={item.id}
+              >
+                <div>
+                  <span>
+                    {item.name} ·{" "}
+                    {item.purpose === "observe" ? "仅观测" : "允许评测"} ·{" "}
+                    {labels[item.status]}
+                  </span>
+                  {item.observation_source_id && (
+                    <p>
+                      <Link
+                        className="text-link"
+                        to={`/observe?source=${item.observation_source_id}`}
+                        onClick={() => void finish()}
+                      >
+                        查看观测
+                      </Link>
+                    </p>
+                  )}
+                </div>
+                {item.status !== "revoked" && item.status !== "expired" && (
+                  <button
+                    type="button"
+                    className="button small"
+                    disabled={busy}
+                    onClick={() => void revoke(item.id)}
+                  >
+                    撤销{item.status === "pending" ? "配对码" : "连接"}
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-      </section>
-      <details>
-        <summary>高级接入与旧版兼容</summary>
-        <div className="form-actions">
-          <button
-            type="button"
-            className="button"
-            disabled={busy || !!pairing}
-            onClick={() => setRemote(true)}
-          >
-            连接标准协议服务
-          </button>
-          <button
-            type="button"
-            className="button"
-            disabled={busy || !!pairing}
-            onClick={onManual}
-          >
-            手动配置评测目标
-          </button>
-        </div>
-      </details>
-      <div className="form-actions">
-        <button
-          type="button"
-          className="button primary"
-          onClick={() => void finish()}
-        >
-          完成
-        </button>
+        </details>
+        <details className="connect-disclosure">
+          <summary>高级接入与旧版兼容</summary>
+          <div className="connect-options">
+            <button
+              type="button"
+              className="button"
+              disabled={busy || !!pairing}
+              onClick={() => setRemote(true)}
+            >
+              连接标准协议服务
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={busy || !!pairing}
+              onClick={onManual}
+            >
+              手动配置评测目标
+            </button>
+          </div>
+        </details>
+        {pairing && (
+          <div className="connect-actions">
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => void finish()}
+            >
+              完成
+            </button>
+          </div>
+        )}
       </div>
     </Dialog>
   );

@@ -39,9 +39,7 @@ export function OperationsPage() {
   return (
     <>
       <PageHeading
-        eyebrow="06 / OPERATIONS"
         title="运行状态"
-        description="查看工作队列、后端就绪状态与 Runner 最近一次心跳。"
         action={
           <button
             className="button"
@@ -125,7 +123,6 @@ export function OperationsPage() {
                   {query.data?.runners.length ?? "—"}
                 </span>
               </div>
-              <span className="muted small-text">每 10 秒刷新</span>
             </div>
             {query.isPending ? (
               <Loading />

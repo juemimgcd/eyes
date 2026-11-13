@@ -2,14 +2,7 @@ import { formatDate } from "../format";
 import { AgentConnectDialog } from "../components/AgentConnectDialog";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowUpRight,
-  FileJson,
-  Fingerprint,
-  Plus,
-  Search,
-  Upload,
-} from "lucide-react";
+import { ArrowUpRight, Fingerprint, Plus, Search, Upload } from "lucide-react";
 import { useConnection } from "../connection";
 import {
   Badge,
@@ -27,27 +20,21 @@ import type { CatalogKind, Payload, TargetContent, Version } from "../types";
 
 const info = {
   targets: {
-    eyebrow: "03 / TARGETS",
     title: "目标 Agent",
-    description: "发布接入配置与能力声明，为每次实验固定目标版本。",
     action: "接入 Agent",
     empty: "还没有接入目标 Agent",
     text: "支持 HTTP 和 Python 接入。目标在独立 Runner 环境执行。",
   },
   datasets: {
-    eyebrow: "04 / DATASETS",
     title: "测试集",
-    description: "用稳定的用例标识，把测试输入、预期和环境要求一起固定。",
     action: "导入测试集",
-    empty: "把你的测试用例带进来",
-    text: "导入 JSONL，整体校验后发布；无效记录会报告具体行号。",
+    empty: "暂无测试集",
+    text: "导入 JSONL 格式的测试用例。",
   },
   scorers: {
-    eyebrow: "05 / SCORERS",
     title: "评分口径",
-    description: "让每一个质量结论，都能追溯到固定口径和执行证据。",
     action: "发布评分器",
-    empty: "定义实验的质量标准",
+    empty: "暂无评分口径",
     text: "支持规则与可信 Python 插件，固定实现摘要和所需证据。",
   },
 };
@@ -82,9 +69,7 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
   return (
     <>
       <PageHeading
-        eyebrow={config.eyebrow}
         title={config.title}
-        description={config.description}
         action={
           api && (
             <button className="button primary" onClick={publish}>
@@ -96,10 +81,7 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
       />
       <div className="catalog-intro">
         <Fingerprint size={20} strokeWidth={1.4} />
-        <p>
-          已发布版本不可变。更新配置时发布新版本，已有实验继续引用原始快照。
-        </p>
-        <span className="mono">IMMUTABLE VERSIONS</span>
+        <p>更新配置会创建新版本，已有实验继续使用原版本。</p>
       </div>
       <section className="panel">
         {api && (
@@ -268,12 +250,6 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
           </div>
         )}
       </section>
-      {!!query.data?.length && (
-        <div className="catalog-footnote">
-          <FileJson size={16} />
-          {config.text}
-        </div>
-      )}
       {open &&
         (kind === "targets" && !manual ? (
           <AgentConnectDialog
