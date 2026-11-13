@@ -92,9 +92,8 @@ jobs:
           ssh eyes-deploy@124.223.14.145 "mkdir -p '$release'"
           printf 'EYES_CONTROL_IMAGE=ghcr.io/juemimgcd/eyes-control:%s\nEYES_FRONTEND_IMAGE=ghcr.io/juemimgcd/eyes-frontend:%s\nEYES_GATEWAY_IMAGE=ghcr.io/juemimgcd/eyes-gateway:%s\n' "$REVISION" "$REVISION" "$REVISION" > deploy/images.env
           scp deploy/compose.yaml deploy/compose.cloud.yaml deploy/compose.tunnel.yaml deploy/compose.tunnel.cloud.yaml deploy/release.sh deploy/images.env "eyes-deploy@124.223.14.145:$release/"
-          docker save "$control" "$frontend" "$gateway" > "$RUNNER_TEMP/eyes-images.tar"
           mkdir "$RUNNER_TEMP/eyes-images"
-          tar -xf "$RUNNER_TEMP/eyes-images.tar" -C "$RUNNER_TEMP/eyes-images"
+          docker save "$control" "$frontend" "$gateway" | tar -xf - -C "$RUNNER_TEMP/eyes-images"
       - name: Transfer changed image layers
         run: |
           rsync --recursive --checksum --partial-dir=.rsync-partial --delete-delay --info=progress2 --stats "$RUNNER_TEMP/eyes-images/" eyes-deploy@124.223.14.145:/opt/eyes/image-cache/
