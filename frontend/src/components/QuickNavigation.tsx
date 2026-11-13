@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { ArrowUpRight, Plug, Search } from "lucide-react";
+import { ArrowUpRight, UserRound, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { navigation, navigationGroups } from "../navigation";
 import { Dialog } from "./ui";
@@ -13,12 +13,8 @@ export function QuickNavigation({
 }) {
   const navigate = useNavigate();
   return (
-    <Dialog
-      title="快速导航"
-      subtitle="查找页面，或打开账号设置。"
-      onClose={onClose}
-    >
-      <Command className="quick-navigation" label="快速导航" loop>
+    <Dialog title="快速导航" onClose={onClose}>
+      <Command className="quick-navigation" label="搜索页面或操作" loop>
         <div className="command-search">
           <Search size={18} aria-hidden="true" />
           <Command.Input
@@ -28,7 +24,7 @@ export function QuickNavigation({
           />
           <kbd>Esc</kbd>
         </div>
-        <Command.List>
+        <Command.List label="匹配的页面与操作">
           <Command.Empty>没有找到相关页面，试试“实验”或“Agent”。</Command.Empty>
           {navigationGroups.map((group) => (
             <Command.Group key={group} heading={group}>
@@ -54,11 +50,11 @@ export function QuickNavigation({
                 ))}
               {group === "工作空间" && (
                 <Command.Item
-                  value="connection"
-                  keywords={["连接", "设置", "令牌", "token"]}
+                  value="account"
+                  keywords={["账号", "设置", "退出登录", "account"]}
                   onSelect={onConnect}
                 >
-                  <Plug size={18} aria-hidden="true" />
+                  <UserRound size={18} aria-hidden="true" />
                   <span>
                     <strong>账号设置</strong>
                     <small>查看当前账号或退出登录</small>

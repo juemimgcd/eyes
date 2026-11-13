@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Link,
+  useLocation,
   useNavigate,
   useParams,
   useSearchParams,
@@ -14,7 +15,8 @@ import {
   Cpu,
   Plug,
   RefreshCw,
-  Terminal,
+  Radio,
+  Info,
   Wrench,
 } from "lucide-react";
 import { useConnection } from "../connection";
@@ -31,6 +33,14 @@ import {
   Pagination,
 } from "../components/ui";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { AgentConnectDialog } from "@/components/AgentConnectDialog";
 import { ObservationFlow } from "@/components/ObservationFlow";
@@ -45,6 +55,17 @@ import {
   FieldLabel,
   FieldDescription,
 } from "@/components/ui/field";
+
+const recordDate = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const recordTime = new Intl.DateTimeFormat("zh-CN", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
 
 type Source = {
   id: string;
@@ -100,7 +121,13 @@ type ReceivedEvents = {
   reset: boolean;
 };
 
-function Status({ value }: { value: string }) {
+function Status({
+  value,
+  evidence = false,
+}: {
+  value: string;
+  evidence?: boolean;
+}) {
   const names: Record<string, string> = {
     running: "运行中",
     completed: "已完成",
@@ -120,11 +147,33 @@ function Status({ value }: { value: string }) {
         : value === "failed"
           ? "destructive"
           : "warning";
-  return <Badge variant={variant}>{names[value] || value}</Badge>;
+  return (
+    <Badge
+      variant={variant}
+      className={evidence ? "evidence-state" : "run-state"}
+    >
+      {evidence && (
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+      )}
+      {names[value] || value}
+    </Badge>
+  );
 }
 
-export function ObservationPage() {
+export function ObservationPage({
+  scrollPositions,
+}: {
+  scrollPositions: Map<string, number>;
+}) {
   const { api } = useConnection();
+  const { key: entryKey } = useLocation();
+  const restoreTableScroll = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) return;
+      element.scrollTop = scrollPositions.get(entryKey) ?? 0;
+    },
+    [entryKey, scrollPositions],
+  );
   const [setup, setSetup] = useState(false);
   const [legacySetup, setLegacySetup] = useState(false);
   const navigate = useNavigate();
@@ -152,17 +201,25 @@ export function ObservationPage() {
     enabled: !!api,
   });
   const rows = query.data?.items.slice(0, 50) || [];
+  const filtered = Boolean(session || source);
+  const firstEmpty =
+    query.isSuccess && rows.length === 0 && page === 0 && !filtered;
+  function changePage(value: number) {
+    const next = new URLSearchParams(params);
+    next.set("page", String(value));
+    setParams(next);
+  }
   return (
     <>
       <PageHeading
-        eyebrow="OBSERVATION"
         title="Agent 观测"
-        description="在 Agent 中照常对话，在这里查看每一次模型与工具调用。"
         action={
-          <Button disabled={!api} onClick={() => setSetup(true)}>
-            <Plug data-icon="inline-start" />
-            接入 Agent
-          </Button>
+          !firstEmpty && (
+            <Button disabled={!api} onClick={() => setSetup(true)}>
+              <Plug data-icon="inline-start" />
+              接入 Agent
+            </Button>
+          )
         }
       />
       {!api ? (
@@ -171,51 +228,64 @@ export function ObservationPage() {
         </section>
       ) : (
         <>
-          <details className="mb-4">
-            <summary>已有埋点或旧版上报接入</summary>
-            <p className="muted">
-              已使用 Eyes 事件协议的 Agent
-              可继续管理来源令牌。统一连接程序会自动创建来源，无需在这里重复接入。
-            </p>
-            <Button variant="ghost" onClick={() => setLegacySetup(true)}>
-              管理事件上报来源
-            </Button>
-          </details>
-          <div className="observation-toolbar">
-            <div className="flex flex-wrap items-center gap-2">
-              <Activity size={16} />
-              <span>{session ? `会话 ${shortId(session)}` : "最近任务"}</span>
-              <span className="muted small-text">每 2 秒更新</span>
-              {(session || source) && (
-                <Button variant="ghost" size="sm" onClick={() => setParams({})}>
-                  查看全部
+          <section className="panel" aria-labelledby="recent-runs-title">
+            <div className="observation-toolbar">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 id="recent-runs-title">
+                  {session
+                    ? `会话 ${shortId(session)}`
+                    : source
+                      ? "来源任务"
+                      : "最近任务"}
+                </h2>
+                {query.data && (
+                  <span className="record-count">本页 {rows.length} 条</span>
+                )}
+                {filtered && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setParams({})}
+                  >
+                    清除筛选
+                  </Button>
+                )}
+              </div>
+              <div className="observation-refresh">
+                {query.dataUpdatedAt > 0 && (
+                  <span>
+                    最近同步{" "}
+                    {new Date(query.dataUpdatedAt).toLocaleTimeString("zh-CN", {
+                      hour12: false,
+                    })}
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="刷新观测记录"
+                  disabled={query.isFetching}
+                  onClick={() => void query.refetch()}
+                >
+                  <RefreshCw
+                    className={query.isFetching ? "spin" : undefined}
+                  />
                 </Button>
-              )}
+              </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="刷新观测记录"
-              disabled={query.isFetching}
-              onClick={() => void query.refetch()}
-            >
-              <RefreshCw />
-            </Button>
-          </div>
-          {query.error && (
-            <ErrorNotice
-              error={query.error}
-              retry={() => void query.refetch()}
-            />
-          )}
-          {query.isPending ? (
-            <Loading label="正在读取 Agent 运行记录" />
-          ) : !rows.length && !query.error ? (
-            <section className="panel">
+            {query.error && (
+              <ErrorNotice
+                error={query.error}
+                retry={() => void query.refetch()}
+              />
+            )}
+            {query.isPending ? (
+              <Loading label="正在读取 Agent 运行记录" />
+            ) : firstEmpty ? (
               <Empty
-                icon={Terminal}
-                title="等待 Agent 发来第一条任务"
-                description="配置观测上报后，在你的 Agent 中执行任务。无需测试集、评分器或 Runner。"
+                icon={Radio}
+                title="暂无任务记录"
+                description="接入 Agent 后，运行一次任务即可看到记录。"
                 action={
                   <Button onClick={() => setSetup(true)}>
                     <Plug data-icon="inline-start" />
@@ -223,61 +293,142 @@ export function ObservationPage() {
                   </Button>
                 }
               />
-            </section>
-          ) : (
-            rows.length > 0 && (
-              <section className="observation-runs" aria-label="Agent 任务记录">
-                {rows.map((run) => (
-                  <article className="observation-run" key={run.id}>
-                    <div className="observation-run-main">
-                      <Link
-                        className="observation-run-title"
-                        to={`/observe/${run.id}`}
-                      >
-                        {run.prompt ||
-                          (run.capture_body ? "继续会话" : "任务正文未采集")}
-                        <ChevronRight size={16} />
-                      </Link>
-                      <div className="observation-run-meta">
-                        <span>{run.source_name}</span>
-                        <span>{run.model}</span>
-                        <button
-                          className="text-button"
-                          onClick={() =>
-                            setParams({
-                              source: run.source_id,
-                              session: run.session_id,
-                            })
-                          }
-                        >
-                          会话 {shortId(run.session_id)}
-                        </button>
-                        <time>{formatDate(run.created_at)}</time>
-                      </div>
-                    </div>
-                    <div className="observation-run-stats">
-                      <span>{run.metrics.turns ?? 0} 轮</span>
-                      <span>{run.metrics.tool_calls ?? 0} 次工具</span>
-                      <Status value={run.status} />
-                      <Status value={run.evidence_status} />
-                    </div>
-                  </article>
-                ))}
-                <Pagination
-                  page={page}
-                  next={(query.data?.items.length || 0) > 50}
-                  onPage={(value) => {
-                    const next = new URLSearchParams(params);
-                    next.set("page", String(value));
-                    setParams(next);
-                  }}
-                />
-              </section>
-            )
-          )}
-          <p className="observation-footnote">
-            只展示 Agent 实际上报的边界。观测中断不代表任务已停止。
+            ) : !rows.length && !query.error ? (
+              <Empty
+                title={page > 0 ? "本页没有任务记录" : "当前筛选下没有任务"}
+                description={
+                  page > 0
+                    ? "返回上一页查看其他记录。"
+                    : "清除筛选可查看所有来源和会话。"
+                }
+                action={
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      page > 0 ? changePage(page - 1) : setParams({})
+                    }
+                  >
+                    {page > 0 ? "上一页" : "查看全部任务"}
+                  </Button>
+                }
+              />
+            ) : (
+              rows.length > 0 && (
+                <>
+                  <Table
+                    className="run-index"
+                    containerProps={{
+                      role: "region",
+                      "aria-labelledby": "recent-runs-title",
+                      tabIndex: 0,
+                      className: "run-index-scroll",
+                      ref: restoreTableScroll,
+                      onScroll: (event) =>
+                        scrollPositions.set(
+                          entryKey,
+                          event.currentTarget.scrollTop,
+                        ),
+                    }}
+                  >
+                    <caption className="sr-only">
+                      Agent 任务记录。按任务开始记录的时间从新到旧排列。
+                    </caption>
+                    <colgroup>
+                      <col className="run-subject-col" />
+                      <col className="run-time-col" />
+                      <col className="run-calls-col" />
+                      <col className="run-state-col" />
+                      <col className="run-evidence-col" />
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead scope="col">任务 / 会话</TableHead>
+                        <TableHead scope="col">记录时间</TableHead>
+                        <TableHead scope="col">轮次 / 工具</TableHead>
+                        <TableHead scope="col">执行状态</TableHead>
+                        <TableHead scope="col">证据状态</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((run) => {
+                        const recordedAt = new Date(run.created_at);
+                        return (
+                          <TableRow key={run.id}>
+                            <th scope="row" className="run-subject">
+                              <Link
+                                className="observation-run-title"
+                                to={`/observe/${run.id}`}
+                                state={{ fromObservationList: true }}
+                              >
+                                {run.prompt ||
+                                  (run.capture_body
+                                    ? "继续会话"
+                                    : "任务正文未采集")}
+                              </Link>
+                              <div className="observation-run-meta">
+                                <span>{run.source_name}</span>
+                                <span>{run.model}</span>
+                                <button
+                                  className="text-button"
+                                  onClick={() =>
+                                    setParams({
+                                      source: run.source_id,
+                                      session: run.session_id,
+                                    })
+                                  }
+                                >
+                                  会话 {shortId(run.session_id)}
+                                </button>
+                              </div>
+                            </th>
+                            <TableCell>
+                              <time
+                                className="record-time"
+                                dateTime={run.created_at}
+                              >
+                                {recordTime.format(recordedAt)}
+                                <small>{recordDate.format(recordedAt)}</small>
+                              </time>
+                            </TableCell>
+                            <TableCell className="record-numbers">
+                              {run.metrics.turns ?? 0}
+                              <span aria-hidden="true"> / </span>
+                              <span className="sr-only"> 轮，工具调用 </span>
+                              {run.metrics.tool_calls ?? 0}
+                            </TableCell>
+                            <TableCell>
+                              <Status value={run.status} />
+                            </TableCell>
+                            <TableCell>
+                              <Status evidence value={run.evidence_status} />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                  <Pagination
+                    page={page}
+                    next={(query.data?.items.length || 0) > 50}
+                    onPage={changePage}
+                  />
+                </>
+              )
+            )}
+          </section>
+          <p className="observation-footnote observation-limit">
+            <Info size={15} aria-hidden="true" />
+            仅显示已上报的事件。观测中断时，任务可能仍在运行。
           </p>
+          <details className="observation-legacy">
+            <summary>已有埋点或旧版上报接入</summary>
+            <p className="muted">
+              统一连接程序会自动创建来源。已有埋点可在这里管理上报令牌。
+            </p>
+            <Button variant="ghost" onClick={() => setLegacySetup(true)}>
+              管理事件上报来源
+            </Button>
+          </details>
         </>
       )}
       {setup && (
@@ -487,6 +638,8 @@ function SourceSetup({
 
 export function ObservationRunPage() {
   const { id } = useParams();
+  const { state } = useLocation();
+  const navigate = useNavigate();
   const { api } = useConnection();
   const client = useQueryClient();
   const query = useQuery<RunDetail>({
@@ -540,14 +693,24 @@ export function ObservationRunPage() {
       : "—";
   return (
     <>
-      <Link className="back-link" to="/observe">
-        <ArrowLeft size={15} />
-        全部观测任务
-      </Link>
+      {state?.fromObservationList ? (
+        <button
+          type="button"
+          className="back-link"
+          onClick={() => navigate(-1)}
+        >
+          <ArrowLeft size={15} />
+          返回任务列表
+        </button>
+      ) : (
+        <Link className="back-link" to="/observe">
+          <ArrowLeft size={15} />
+          全部观测任务
+        </Link>
+      )}
       <PageHeading
-        eyebrow="RUN"
         title={run.source_name}
-        description={`${run.model} · 会话 ${shortId(run.session_id)} · 每 2 秒更新`}
+        description={`${run.model} · 会话 ${shortId(run.session_id)}`}
         action={
           <Button
             variant="outline"
@@ -565,37 +728,59 @@ export function ObservationRunPage() {
       {query.error && (
         <ErrorNotice error={query.error} retry={() => void query.refetch()} />
       )}
-      <div className="observation-status">
-        <Status value={run.status} />
-        <Status value={run.evidence_status} />
-        <span className="muted small-text">
-          最近上报 {formatDate(run.last_seen_at)}
-        </span>
+      <div className="run-summary">
+        <section className="observation-task" aria-label="本次任务">
+          <span className="section-label">用户任务</span>
+          <p>
+            {run.prompt ||
+              (run.capture_body
+                ? "继续既有会话，查看下方输入事件。"
+                : "未启用正文采集。可在 Agent 的上报配置中设置 EYES_CAPTURE_BODY=true 后开始新任务。")}
+          </p>
+          <div className="observation-run-meta">
+            <span>
+              {run.metrics.usage_responses
+                ? `${run.metrics.total_tokens?.toLocaleString()} tokens（已报告部分）`
+                : "Token 用量未知"}
+            </span>
+            <span>
+              {run.metrics.usage_responses ?? 0} 个响应提供用量 ·{" "}
+              {run.metrics.unknown_usage ?? 0} 个请求用量未知
+            </span>
+          </div>
+        </section>
+        <div className="observation-status">
+          <Status value={run.status} />
+          <Status evidence value={run.evidence_status} />
+          <span className="muted small-text">
+            最近上报 {formatDate(run.last_seen_at)}
+          </span>
+        </div>
+        <Metrics
+          items={[
+            {
+              label: "循环轮次",
+              value: run.metrics.turns ?? 0,
+              note: "已观察到的轮次开始",
+            },
+            {
+              label: "模型调用",
+              value: run.metrics.model_calls ?? 0,
+              note: "实际请求尝试，包含重试与摘要",
+            },
+            {
+              label: "工具调用",
+              value: run.metrics.tool_calls ?? 0,
+              note: "实际进入工具执行的次数",
+            },
+            {
+              label: "任务耗时",
+              value: elapsed,
+              note: "Agent 开始到结束，不含上传",
+            },
+          ]}
+        />
       </div>
-      <Metrics
-        items={[
-          {
-            label: "循环轮次",
-            value: run.metrics.turns ?? 0,
-            note: "已观察到的轮次开始",
-          },
-          {
-            label: "模型调用",
-            value: run.metrics.model_calls ?? 0,
-            note: "实际请求尝试，包含重试与摘要",
-          },
-          {
-            label: "工具调用",
-            value: run.metrics.tool_calls ?? 0,
-            note: "实际进入工具执行的次数",
-          },
-          {
-            label: "任务耗时",
-            value: elapsed,
-            note: "Agent 开始到结束，不含上传",
-          },
-        ]}
-      />
       {run.evidence_status === "partial" && (
         <div className="notice" role="status">
           <p>
@@ -606,26 +791,6 @@ export function ObservationRunPage() {
           </p>
         </div>
       )}
-      <section className="observation-task" aria-label="本次任务">
-        <span className="section-label">用户任务</span>
-        <p>
-          {run.prompt ||
-            (run.capture_body
-              ? "继续既有会话，查看下方输入事件。"
-              : "未启用正文采集。可在 Agent 的上报配置中设置 EYES_CAPTURE_BODY=true 后开始新任务。")}
-        </p>
-        <div className="observation-run-meta">
-          <span>
-            {run.metrics.usage_responses
-              ? `${run.metrics.total_tokens?.toLocaleString()} tokens（已报告部分）`
-              : "Token 用量未知"}
-          </span>
-          <span>
-            {run.metrics.usage_responses ?? 0} 个响应提供用量 ·{" "}
-            {run.metrics.unknown_usage ?? 0} 个请求用量未知
-          </span>
-        </div>
-      </section>
       <div className="observation-chain-heading">
         <h2>执行链路</h2>
         <span className="muted small-text">

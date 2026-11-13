@@ -82,9 +82,7 @@ export function BatchesPage() {
   return (
     <>
       <PageHeading
-        eyebrow=""
         title="多 Agent 批次"
-        description="一次安排多个 Agent，各自执行测试集，集中跟踪任务进度。"
         action={
           api && (
             <Button onClick={() => setCreateOpen(true)}>
@@ -199,11 +197,10 @@ function BatchView({ id }: { id: string }) {
         全部批次
       </Link>
       <PageHeading
-        eyebrow=""
         title={data?.name || "批次详情"}
         description={
           data
-            ? `${shortId(id)} · ${formatDate(data.created_at)} · 每 5 秒更新`
+            ? `${shortId(id)} · ${formatDate(data.created_at)}`
             : "查看各 Agent 的任务执行和证据。"
         }
         action={

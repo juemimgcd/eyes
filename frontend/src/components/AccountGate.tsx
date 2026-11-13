@@ -140,20 +140,12 @@ function LoginForm({
   return (
     <main className="account-page">
       <section className="account-form" aria-labelledby="account-title">
-        <div className="console-brand">
-          <Eye />
-          <span>eyes.</span>
-        </div>
         <header className="account-heading">
-          <p className="account-eyebrow">AGENT 测试与执行观测</p>
-          <h1 id="account-title">
-            {register ? "创建你的工作空间" : "登录 Eyes"}
-          </h1>
-          <p>
-            {register
-              ? "注册个人账号，开始接入 Agent 和记录实验。"
-              : "回到你的 Agent、实验和执行记录。"}
-          </p>
+          <div className="console-brand" aria-label="Eyes">
+            <Eye />
+            <span>eyes.</span>
+          </div>
+          <h1 id="account-title">{register ? "注册账号" : "登录"}</h1>
         </header>
         <form className="form" onSubmit={submit}>
           <FieldGroup>
@@ -163,6 +155,7 @@ function LoginForm({
                 id="username"
                 autoComplete="username"
                 required
+                aria-describedby={register ? "username-help" : undefined}
                 minLength={3}
                 maxLength={40}
                 pattern="[a-zA-Z0-9_][a-zA-Z0-9_.\-]*"
@@ -171,8 +164,9 @@ function LoginForm({
                 onChange={(event) => setUsername(event.target.value)}
               />
               {register && (
-                <FieldDescription>
-                  3–40 位字母、数字、下划线，可包含点和短横线；不区分大小写。
+                <FieldDescription id="username-help">
+                  3–40
+                  位，可用英文字母、数字、下划线、点和短横线。点和短横线不能开头。
                 </FieldDescription>
               )}
             </Field>
@@ -183,6 +177,7 @@ function LoginForm({
                 type="password"
                 autoComplete={register ? "new-password" : "current-password"}
                 required
+                aria-describedby={register ? "password-help" : undefined}
                 minLength={register ? 12 : 1}
                 maxLength={128}
                 value={password}
@@ -190,8 +185,8 @@ function LoginForm({
                 onChange={(event) => setPassword(event.target.value)}
               />
               {register && (
-                <FieldDescription>
-                  使用 12–128 位密码，建议使用密码管理器生成。
+                <FieldDescription id="password-help">
+                  12–128 个字符。
                 </FieldDescription>
               )}
             </Field>
@@ -224,7 +219,7 @@ function LoginForm({
           </Button>
           <Button
             type="button"
-            variant="ghost"
+            variant="link"
             disabled={busy}
             onClick={() => {
               setRegister(!register);
@@ -236,9 +231,6 @@ function LoginForm({
             {register ? "已有账号？返回登录" : "还没有账号？注册"}
           </Button>
         </form>
-        <p className="account-note">
-          每个账号拥有独立工作空间，数据仅对该账号及其授权的接入凭据开放。
-        </p>
       </section>
     </main>
   );

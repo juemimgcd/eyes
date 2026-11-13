@@ -137,11 +137,10 @@ function ExperimentView({ id }: { id: string }) {
         </Link>
       )}
       <PageHeading
-        eyebrow={`EXPERIMENT / ${shortId(id).toUpperCase()}`}
         title={data?.snapshot.target.content.name || "实验详情"}
         description={
           data
-            ? `${data.snapshot.target.content.external_version || "外部版本未知"} · 创建于 ${formatDate(data.created_at)} · 每 10 秒更新`
+            ? `${data.snapshot.target.content.external_version || "外部版本未知"} · 创建于 ${formatDate(data.created_at)}`
             : "查看用例、评分与每次执行尝试。"
         }
         action={

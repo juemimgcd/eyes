@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupInput,
@@ -126,19 +126,22 @@ export function ExperimentsPage() {
   return (
     <>
       <PageHeading
-        eyebrow=""
         title="实验"
-        description="查看固定配置、执行状态和用例结果。"
         action={
           api && (
             <>
-              <Link className="button" to="/batches">
+              <Link
+                className={buttonVariants({ variant: "outline" })}
+                to="/batches"
+              >
                 多 Agent 批次
               </Link>
-              <Button onClick={create}>
-                <Plus data-icon="inline-start" />
-                创建实验
-              </Button>
+              {!(query.isSuccess && page === 0 && items.length === 0) && (
+                <Button onClick={create}>
+                  <Plus data-icon="inline-start" />
+                  创建实验
+                </Button>
+              )}
             </>
           )
         }
@@ -388,7 +391,7 @@ export function ExperimentsPage() {
                   ? "正在同步…"
                   : query.isError
                     ? "同步失败"
-                    : "每 10 秒更新"}
+                    : "已同步"}
               </span>
               <Pagination
                 page={page}
@@ -460,51 +463,54 @@ function ExperimentSetup({ onCreate }: { onCreate: () => void }) {
   const next = steps.find((step) => step.count === 0);
   return (
     <div className="experiment-setup">
-      <Empty
-        icon={FlaskConical}
-        title="尚无实验"
-        description={
-          next
-            ? "先准备目标、测试集和评分口径，再创建实验。"
-            : "目标、测试集和评分口径已就绪。"
-        }
-        action={
-          next ? (
-            <Button nativeButton={false} render={<Link to={next.to} />}>
-              配置{next.name}
-            </Button>
-          ) : (
-            <Button onClick={onCreate}>
-              <Plus data-icon="inline-start" />
-              创建实验
-            </Button>
-          )
-        }
-      />
-      <ul className="experiment-setup-list">
-        {steps.map((step) => (
-          <li key={step.to}>
-            <Link to={step.to}>
-              <step.icon />
-              <span>
-                <strong>{step.name}</strong>
-                <small>{step.description}</small>
-              </span>
-              <span className="setup-availability">
-                {step.count > 0 ? (
-                  <>
-                    <Check />
-                    {step.count} 个版本
-                  </>
-                ) : (
-                  "待配置"
-                )}
-              </span>
-              <ArrowRight />
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <div className="experiment-setup-intro">
+        <FlaskConical size={24} strokeWidth={1.6} aria-hidden="true" />
+        <h2>准备第一场实验</h2>
+        {next ? (
+          <Link className={buttonVariants()} to={next.to}>
+            配置{next.name}
+            <ArrowRight />
+          </Link>
+        ) : (
+          <Button onClick={onCreate}>
+            <Plus />
+            创建实验
+          </Button>
+        )}
+      </div>
+      <div className="experiment-prerequisites">
+        <div className="setup-heading">
+          <h3>实验所需配置</h3>
+          <span>
+            {steps.filter((step) => step.count > 0).length} / {steps.length}{" "}
+            已就绪
+          </span>
+        </div>
+        <ul className="experiment-setup-list">
+          {steps.map((step) => (
+            <li key={step.to}>
+              <Link to={step.to}>
+                <step.icon />
+                <span>
+                  <strong>{step.name}</strong>
+                  <small>{step.description}</small>
+                </span>
+                <span className="setup-availability">
+                  {step.count > 0 ? (
+                    <>
+                      <Check />
+                      {step.count} 个版本
+                    </>
+                  ) : (
+                    "待配置"
+                  )}
+                </span>
+                <ArrowRight />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

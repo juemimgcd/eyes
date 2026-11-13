@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Search, UserRound, LogOut, X } from "lucide-react";
+import { ChevronRight, Search, UserRound, LogOut, X } from "lucide-react";
 import {
   NavLink,
   Navigate,
@@ -120,6 +120,9 @@ function Workspace({
 }) {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [observationScrollPositions] = useState(
+    () => new Map<string, number>(),
+  );
   const queryClient = useQueryClient();
   const expireConnection = useCallback(() => {
     queryClient.clear();
@@ -152,7 +155,6 @@ function Workspace({
           }
         >
           <WorkspaceShell
-            api={api}
             account={account}
             realtime={realtime}
             pageName={pageName}
@@ -163,7 +165,14 @@ function Workspace({
             <Suspense fallback={<Loading label="正在打开页面" />}>
               <Routes>
                 <Route path="/" element={<Navigate to="/observe" replace />} />
-                <Route path="/observe" element={<ObservationPage />} />
+                <Route
+                  path="/observe"
+                  element={
+                    <ObservationPage
+                      scrollPositions={observationScrollPositions}
+                    />
+                  }
+                />
                 <Route path="/observe/:id" element={<ObservationRunPage />} />
                 <Route path="/experiments" element={<ExperimentsPage />} />
                 <Route path="/batches" element={<BatchesPage />} />
@@ -227,7 +236,6 @@ function Workspace({
 }
 
 function WorkspaceShell({
-  api,
   account,
   realtime,
   pageName,
@@ -236,7 +244,6 @@ function WorkspaceShell({
   setQuickOpen,
   children,
 }: {
-  api: Api | null;
   account: Account;
   realtime: "offline" | "connecting" | "live" | "polling";
   pageName: string;
@@ -274,7 +281,7 @@ function WorkspaceShell({
   return (
     <>
       <Sidebar collapsible="icon" aria-label="工作空间导航">
-        <SidebarHeader className="gap-4 px-3 py-4 group-data-[collapsible=icon]:px-2">
+        <SidebarHeader className="justify-center border-b border-sidebar-border px-4 h-16 group-data-[collapsible=icon]:px-2">
           <div className="flex items-center justify-between gap-2">
             <NavLink
               to="/observe"
@@ -298,39 +305,17 @@ function WorkspaceShell({
               </Button>
             )}
           </div>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                size="lg"
-                variant="outline"
-                tooltip="个人账号"
-                onClick={connect}
-                aria-label="个人账号"
-              >
-                <UserRound />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span>{account.username}</span>
-                  <span className="console-project-note">
-                    {
-                      {
-                        offline: "尚未连接",
-                        connecting: "正在连接更新",
-                        live: "实时更新已连接",
-                        polling: "定期同步 · 实时连接暂不可用",
-                      }[realtime]
-                    }
-                  </span>
-                </span>
-                <ChevronDown className="ml-auto group-data-[collapsible=icon]:hidden" />
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarContent className="pt-3">
           <nav aria-label="主导航">
             {navigationGroups.map((group) => (
-              <SidebarGroup key={group}>
-                <SidebarGroupLabel>{group}</SidebarGroupLabel>
+              <SidebarGroup
+                key={group}
+                className="px-3 group-data-[collapsible=icon]:px-2"
+              >
+                <SidebarGroupLabel className="text-sidebar-foreground/75">
+                  {group}
+                </SidebarGroupLabel>
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {navigation
@@ -340,6 +325,8 @@ function WorkspaceShell({
                           <SidebarMenuButton
                             render={<NavLink to={item.url} />}
                             isActive={location.pathname.startsWith(item.url)}
+                            className="gap-2.5 md:h-9 data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground data-active:font-semibold"
+                            aria-label={item.text}
                             tooltip={item.text}
                             onClick={() => setOpenMobile(false)}
                           >
@@ -354,15 +341,30 @@ function WorkspaceShell({
             ))}
           </nav>
         </SidebarContent>
-        <SidebarFooter className="px-4 py-4 group-data-[collapsible=icon]:hidden">
-          <div className="console-version">
-            <span>Eyes Console</span>
-            <span>v0.1</span>
-          </div>
+        <SidebarFooter className="border-t border-sidebar-border p-3 group-data-[collapsible=icon]:px-2">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                size="lg"
+                tooltip="账号设置"
+                aria-label={`账号设置，${account.username}`}
+                onClick={connect}
+              >
+                <UserRound />
+                <span className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
+                  <strong className="truncate font-medium">
+                    {account.username}
+                  </strong>
+                  <span className="text-xs opacity-80">个人工作空间</span>
+                </span>
+                <ChevronRight className="opacity-75 group-data-[collapsible=icon]:hidden" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="console-topbar flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4 md:px-6">
+        <header className="console-topbar flex h-16 shrink-0 items-center justify-between gap-3 border-b px-4 md:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger
               aria-label={
@@ -370,7 +372,7 @@ function WorkspaceShell({
               }
               aria-expanded={isMobile ? openMobile : open}
             />
-            <Breadcrumb>
+            <Breadcrumb aria-label="当前位置">
               <BreadcrumbList>
                 <BreadcrumbItem className="hidden sm:block">
                   工作空间
@@ -384,38 +386,32 @@ function WorkspaceShell({
           </div>
           <div className="flex shrink-0 items-center gap-2 md:gap-3">
             <Button
-              variant="ghost"
-              size="icon"
+              variant="outline"
               aria-label="快速导航"
               title="快速导航（⌘ K / Ctrl K）"
               aria-keyshortcuts="Meta+k Control+k"
               onClick={() => setQuickOpen(true)}
             >
               <Search />
+              <span className="hidden sm:inline">快速导航</span>
+              <kbd className="ml-2 hidden sm:inline-flex" aria-hidden="true">
+                {navigator.platform.startsWith("Mac") ? "⌘ K" : "Ctrl K"}
+              </kbd>
             </Button>
-            <span
-              className="console-connection hidden sm:inline-flex"
-              data-connected={!!api}
-            >
-              <i />
-              {api ? "已认证" : "未连接"}
+            <span className="console-connection" data-mode={realtime}>
+              <i aria-hidden="true" />
+              {
+                {
+                  offline: "未连接",
+                  connecting: "连接中",
+                  live: "实时同步",
+                  polling: "定期同步",
+                }[realtime]
+              }
             </span>
-            <Button
-              variant="outline"
-              onClick={openConnection}
-              aria-label="账号设置"
-            >
-              <UserRound data-icon="inline-start" />
-              <span className="hidden sm:inline">账号设置</span>
-              <span className="sm:hidden">账号</span>
-            </Button>
           </div>
         </header>
-        <main
-          id="main"
-          tabIndex={-1}
-          className="console-main mx-0 w-full min-w-0 max-w-none px-4 py-6 md:px-6 md:py-7"
-        >
+        <main id="main" tabIndex={-1} className="console-main">
           {children}
         </main>
       </div>
@@ -451,7 +447,6 @@ function AccountDialog({
       onClose={onClose}
     >
       <div className="form">
-        <p>你的 Agent、测试集、实验和观测记录保存在此账号下。</p>
         {error != null && <ErrorNotice error={error} />}
         <div className="form-actions">
           <Button variant="outline" onClick={onClose} disabled={busy}>
