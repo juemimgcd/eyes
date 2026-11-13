@@ -1,6 +1,6 @@
 # 控制后端开发说明
 
-当前实现 Eyes 的控制后端基础及配套 Runner。Agent 端入口、HTTP 协议、SDK 与评分器说明见 [接入文档](agent-integration.md)。源码按 AGENT.md 的模块边界组织；HTTP 路由负责认证和协议转换，领域模块负责校验、状态及事务。当前不具备 M1 真实闭环验收结果，具体证据见 [验证记录](backend-validation.md)。
+当前实现 Eyes 的控制后端基础及配套 Runner。Agent 端入口、HTTP 协议、SDK 与评分器说明见 [接入文档](agent-integration.md)。源码按 [AGENTS.md](../AGENTS.md) 的模块边界组织；HTTP 路由负责认证和协议转换，领域模块负责校验、状态及事务。当前不具备 M1 真实闭环验收结果，具体证据见 [验证记录](backend-validation.md)。
 
 ## 当前实现与后续工作
 
@@ -203,7 +203,7 @@ API 使用 OTel SDK 创建实际 HTTP 请求 span，接收 W3C Trace Context，�
 
 已提供 `eyes-server`、`eyes-scheduler`、`eyes-admin`、`eyes-runner`、开发者 CLI `eyes` 和运维 CLI `eyes-ops`。新增回归、封存和评分重试端点见 [平台说明](platform.md)。
 
-HTTP 与 Python 通用接入功能已有实现，按本次要求暂缓真实 Agent 联调。后续恢复验收时，在可运行的 PostgreSQL 环境执行迁移，接入两个真实 Agent，运行导入、领取、执行、证据查询和独立评分。之后再验证多 Runner 限额、租约过期、取消、迟到上报和评分故障。原始结果须按 [AGENT.md](../AGENT.md) 的阶段要求保存。
+HTTP 与 Python 通用接入功能已有实现，按本次要求暂缓真实 Agent 联调。后续恢复验收时，在可运行的 PostgreSQL 环境执行迁移，接入两个真实 Agent，运行导入、领取、执行、证据查询和独立评分。之后再验证多 Runner 限额、租约过期、取消、迟到上报和评分故障。原始结果须按 [架构方案的阶段要求](architecture.md#分阶段交付) 保存。
 
 多 Agent 批次新增公开 API 和 CLI，在同一事务创建多份独立实验，详见 [多 Agent 批次](multi-agent-batches.md)。
 
