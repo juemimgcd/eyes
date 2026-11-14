@@ -2,7 +2,17 @@ import { formatDate } from "../format";
 import { AgentConnectDialog } from "../components/AgentConnectDialog";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, Fingerprint, Plus, Search, Upload } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  Database,
+  Fingerprint,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  Target,
+  Upload,
+} from "lucide-react";
 import { useConnection } from "../connection";
 import {
   Badge,
@@ -20,18 +30,21 @@ import type { CatalogKind, Payload, TargetContent, Version } from "../types";
 
 const info = {
   targets: {
+    icon: Target,
     title: "目标 Agent",
     action: "接入 Agent",
     empty: "还没有接入目标 Agent",
     text: "支持 HTTP 和 Python 接入。目标在独立 Runner 环境执行。",
   },
   datasets: {
+    icon: Database,
     title: "测试集",
     action: "导入测试集",
     empty: "暂无测试集",
     text: "导入 JSONL 格式的测试用例。",
   },
   scorers: {
+    icon: SlidersHorizontal,
     title: "评分口径",
     action: "发布评分器",
     empty: "暂无评分口径",
@@ -114,6 +127,7 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
           <ErrorNotice error={query.error} retry={() => void query.refetch()} />
         ) : !query.data.length ? (
           <Empty
+            icon={config.icon}
             title={config.empty}
             description={config.text}
             action={
@@ -125,6 +139,7 @@ function CatalogView({ kind }: { kind: CatalogKind }) {
           />
         ) : !filtered.length ? (
           <Empty
+            icon={Search}
             compact
             title="没有匹配的版本"
             description="修改搜索词，或清除筛选查看全部版本。"
@@ -280,6 +295,11 @@ function VersionDialog({
 }) {
   const [search, setSearch] = useState("");
   const cases = kind === "datasets" ? (version.content.cases as Payload[]) : [];
+  const matchingCases = cases.filter((c) =>
+    `${c.case_id} ${(c.tags as string[])?.join(" ")}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
   return (
     <Dialog
       wide
@@ -307,23 +327,23 @@ function VersionDialog({
               />
             </div>
             <div className="dataset-cases">
-              {cases
-                .filter((c) =>
-                  `${c.case_id} ${(c.tags as string[])?.join(" ")}`.includes(
-                    search,
-                  ),
-                )
-                .map((c) => (
-                  <details key={String(c.case_id)}>
-                    <summary>
-                      <span>{String(c.case_id)}</span>
-                      <span className="mono">
-                        {(c.tags as string[])?.join(" / ")}
-                      </span>
-                    </summary>
-                    <JsonBlock value={c} />
-                  </details>
-                ))}
+              {search && !matchingCases.length && (
+                <p className="muted" role="status">
+                  没有匹配的用例。请修改或清空搜索词。
+                </p>
+              )}
+              {matchingCases.map((c) => (
+                <details key={String(c.case_id)}>
+                  <summary>
+                    <ChevronRight size={15} aria-hidden="true" />
+                    <span>{String(c.case_id)}</span>
+                    <span className="mono">
+                      {(c.tags as string[])?.join(" / ")}
+                    </span>
+                  </summary>
+                  <JsonBlock value={c} />
+                </details>
+              ))}
             </div>
           </>
         ) : (

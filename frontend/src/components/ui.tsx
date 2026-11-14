@@ -220,16 +220,18 @@ export function Empty({
   description,
   action,
   compact = false,
+  className,
   icon: Icon = Database,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
   compact?: boolean;
+  className?: string;
   icon?: LucideIcon;
 }) {
   return (
-    <EmptyPrimitive className={cn("py-14", compact && "py-8")}>
+    <EmptyPrimitive className={cn("py-14", compact && "py-8", className)}>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <Icon />
@@ -263,12 +265,14 @@ export function Dialog({
   children,
   onClose,
   wide = false,
+  className,
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const returnFocus = useRef(document.activeElement as HTMLElement | null);
   return (
@@ -280,8 +284,9 @@ export function Dialog({
     >
       <DialogContent
         className={cn(
-          "console-dialog max-h-[calc(100dvh-2rem)] overflow-y-auto p-0 sm:max-w-[480px]",
+          "console-dialog max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto p-0 sm:max-w-[480px]",
           wide && "sm:max-w-[760px]",
+          className,
         )}
         showCloseButton={false}
         finalFocus={returnFocus}
@@ -468,7 +473,9 @@ export function CheckItem({
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
-      <span className="check-visual">{checked && <Check size={12} />}</span>
+      <span className="check-visual" aria-hidden="true">
+        <Check size={12} />
+      </span>
       {children}
     </label>
   );

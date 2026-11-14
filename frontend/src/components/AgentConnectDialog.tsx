@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { Info, Radio, SlidersHorizontal } from "lucide-react";
 import { useConnection } from "../connection";
 import { formatDate } from "../format";
 import { AgentDiscoveryDialog } from "./AgentDiscoveryDialog";
 import { Dialog, ErrorNotice, Field } from "./ui";
+import { FieldLegend, FieldSet } from "./ui/field";
 
 type Purpose = "observe" | "evaluate";
 type Pairing = {
@@ -18,6 +20,20 @@ type Pairing = {
   observation_source_id: string | null;
   last_seen_at: string | null;
 };
+const connectionPurposes = [
+  {
+    value: "observe",
+    icon: Radio,
+    title: "仅观测",
+    description: "仅上传模型通信，Agent 自己执行任务。",
+  },
+  {
+    value: "evaluate",
+    icon: SlidersHorizontal,
+    title: "允许评测",
+    description: "允许 Eyes 调用任务接口，可同时开启模型观测。",
+  },
+] as const;
 const labels = {
   pending: "等待配对",
   expired: "配对码已过期",
@@ -142,6 +158,29 @@ export function AgentConnectDialog({
     >
       <div className="connect-body">
         <form className="connect-form" onSubmit={create}>
+          <FieldSet className="purpose-fieldset" disabled={busy || !!pairing}>
+            <FieldLegend variant="label">接入用途</FieldLegend>
+            <div className="connect-fields purpose-options">
+              {connectionPurposes.map(
+                ({ value, icon: Icon, title, description }) => (
+                  <label className="purpose-option" key={value}>
+                    <Icon size={18} aria-hidden="true" />
+                    <strong>{title}</strong>
+                    <input
+                      type="radio"
+                      name="connection-purpose"
+                      value={value}
+                      checked={purpose === value}
+                      onChange={() => setPurpose(value)}
+                      aria-label={title}
+                      aria-describedby={`purpose-${value}-hint`}
+                    />
+                    <small id={`purpose-${value}-hint`}>{description}</small>
+                  </label>
+                ),
+              )}
+            </div>
+          </FieldSet>
           <div className="connect-fields">
             <Field
               label="Agent 名称"
@@ -156,20 +195,19 @@ export function AgentConnectDialog({
               />
             </Field>
             <Field
-              label="接入用途"
-              hint={
-                purpose === "observe"
-                  ? "仅上传模型通信，Agent 自己执行任务。"
-                  : "允许 Eyes 调用任务接口；可同时开启模型观测。"
-              }
+              label="Agent 所在机器的系统"
+              hint="在 Agent 所在机器持续运行连接程序，无需安装 Python 或 Eyes 包。每个 Agent 使用独立目录保存连接状态。"
             >
               <select
-                value={purpose}
+                value={platform}
                 disabled={busy || !!pairing}
-                onChange={(e) => setPurpose(e.target.value as Purpose)}
+                onChange={(e) => setPlatform(e.target.value)}
               >
-                <option value="observe">仅观测 · Agent 自己执行</option>
-                <option value="evaluate">允许评测 · Eyes 可发起任务</option>
+                <option value="darwin-arm64">macOS · Apple Silicon</option>
+                <option value="linux-amd64">Linux · amd64</option>
+                <option value="windows-amd64">
+                  Windows · amd64（PowerShell）
+                </option>
               </select>
             </Field>
           </div>
@@ -223,25 +261,12 @@ export function AgentConnectDialog({
             />
           </Field>
           <p className="connect-scope">
-            模型观测会上传经过代理的请求与响应正文。工具执行过程需由 Agent
-            单独上报。
+            <Info size={16} aria-hidden="true" />
+            <span>
+              模型观测会上传经过代理的请求与响应正文。工具执行过程需由 Agent
+              单独上报。
+            </span>
           </p>
-          <Field
-            label="Agent 所在机器的系统"
-            hint="在 Agent 所在机器持续运行连接程序，无需安装 Python 或 Eyes 包。每个 Agent 使用独立目录保存连接状态。"
-          >
-            <select
-              value={platform}
-              disabled={busy || !!pairing}
-              onChange={(e) => setPlatform(e.target.value)}
-            >
-              <option value="darwin-arm64">macOS · Apple Silicon</option>
-              <option value="linux-amd64">Linux · amd64</option>
-              <option value="windows-amd64">
-                Windows · amd64（PowerShell）
-              </option>
-            </select>
-          </Field>
           {tunnelConfig.isPending && <p role="status">正在检查连接服务…</p>}
           {tunnelConfig.error && (
             <ErrorNotice
