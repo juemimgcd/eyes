@@ -283,6 +283,7 @@ export function ObservationPage({
               <Loading label="正在读取 Agent 运行记录" />
             ) : firstEmpty ? (
               <Empty
+                className="observation-start"
                 icon={Radio}
                 title="暂无任务记录"
                 description="接入 Agent 后，运行一次任务即可看到记录。"

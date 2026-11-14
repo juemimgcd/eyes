@@ -1,5 +1,5 @@
 import { Command } from "cmdk";
-import { ArrowUpRight, UserRound, Search } from "lucide-react";
+import { CornerDownLeft, UserRound, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { navigation, navigationGroups } from "../navigation";
 import { Dialog } from "./ui";
@@ -13,7 +13,11 @@ export function QuickNavigation({
 }) {
   const navigate = useNavigate();
   return (
-    <Dialog title="快速导航" onClose={onClose}>
+    <Dialog
+      title="快速导航"
+      onClose={onClose}
+      className="md:top-[min(14dvh,8rem)] md:max-h-[calc(100dvh-min(14dvh,8rem)-1rem)] md:translate-y-0"
+    >
       <Command className="quick-navigation" label="搜索页面或操作" loop>
         <div className="command-search">
           <Search size={18} aria-hidden="true" />
@@ -45,7 +49,11 @@ export function QuickNavigation({
                       <strong>{item.text}</strong>
                       <small>{item.description}</small>
                     </span>
-                    <ArrowUpRight size={15} aria-hidden="true" />
+                    <CornerDownLeft
+                      className="command-enter"
+                      size={15}
+                      aria-hidden="true"
+                    />
                   </Command.Item>
                 ))}
               {group === "工作空间" && (
@@ -59,7 +67,11 @@ export function QuickNavigation({
                     <strong>账号设置</strong>
                     <small>查看当前账号或退出登录</small>
                   </span>
-                  <ArrowUpRight size={15} aria-hidden="true" />
+                  <CornerDownLeft
+                    className="command-enter"
+                    size={15}
+                    aria-hidden="true"
+                  />
                 </Command.Item>
               )}
             </Command.Group>

@@ -461,10 +461,13 @@ function ExperimentSetup({ onCreate }: { onCreate: () => void }) {
     },
   ];
   const next = steps.find((step) => step.count === 0);
+  const ready = steps.filter((step) => step.count > 0).length;
   return (
     <div className="experiment-setup">
       <div className="experiment-setup-intro">
-        <FlaskConical size={24} strokeWidth={1.6} aria-hidden="true" />
+        <span className="setup-symbol" aria-hidden="true">
+          <FlaskConical size={24} strokeWidth={1.6} />
+        </span>
         <h2>准备第一场实验</h2>
         {next ? (
           <Link className={buttonVariants()} to={next.to}>
@@ -482,9 +485,13 @@ function ExperimentSetup({ onCreate }: { onCreate: () => void }) {
         <div className="setup-heading">
           <h3>实验所需配置</h3>
           <span>
-            {steps.filter((step) => step.count > 0).length} / {steps.length}{" "}
-            已就绪
+            {ready} / {steps.length} 已就绪
           </span>
+        </div>
+        <div className="setup-progress" aria-hidden="true">
+          {steps.map((step) => (
+            <span key={step.to} data-ready={step.count > 0} />
+          ))}
         </div>
         <ul className="experiment-setup-list">
           {steps.map((step) => (
@@ -495,7 +502,10 @@ function ExperimentSetup({ onCreate }: { onCreate: () => void }) {
                   <strong>{step.name}</strong>
                   <small>{step.description}</small>
                 </span>
-                <span className="setup-availability">
+                <span
+                  className="setup-availability"
+                  data-ready={step.count > 0}
+                >
                   {step.count > 0 ? (
                     <>
                       <Check />

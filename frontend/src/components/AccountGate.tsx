@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { ArrowRight, Eye as EyeIcon, EyeOff, LoaderCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Api, ApiError } from "../api";
 import { ErrorNotice, Eye, Loading } from "./ui";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "./ui/input-group";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "./ui/field";
 
 export type Account = { id: string; username: string; project_id: string };
@@ -100,6 +107,30 @@ export function AccountGate({
   );
 }
 
+function PasswordInput({
+  toggleLabel,
+  ...props
+}: ComponentProps<typeof Input> & { toggleLabel: string }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <InputGroup>
+      <InputGroupInput {...props} type={visible ? "text" : "password"} />
+      <InputGroupAddon align="inline-end">
+        <InputGroupButton
+          size="icon-sm"
+          aria-label={toggleLabel}
+          aria-pressed={visible}
+          aria-controls={props.id}
+          disabled={props.disabled}
+          onClick={() => setVisible(!visible)}
+        >
+          {visible ? <EyeOff /> : <EyeIcon />}
+        </InputGroupButton>
+      </InputGroupAddon>
+    </InputGroup>
+  );
+}
+
 function LoginForm({
   error: connectionError,
   onRetry,
@@ -172,9 +203,10 @@ function LoginForm({
             </Field>
             <Field data-disabled={busy}>
               <FieldLabel htmlFor="password">密码</FieldLabel>
-              <Input
+              <PasswordInput
+                key={register ? "new" : "current"}
+                toggleLabel="显示密码"
                 id="password"
-                type="password"
                 autoComplete={register ? "new-password" : "current-password"}
                 required
                 aria-describedby={register ? "password-help" : undefined}
@@ -193,9 +225,9 @@ function LoginForm({
             {register && (
               <Field data-disabled={busy}>
                 <FieldLabel htmlFor="confirm-password">确认密码</FieldLabel>
-                <Input
+                <PasswordInput
+                  toggleLabel="显示确认密码"
                   id="confirm-password"
-                  type="password"
                   autoComplete="new-password"
                   required
                   value={confirm}
@@ -214,22 +246,31 @@ function LoginForm({
               </Button>
             </>
           )}
-          <Button type="submit" disabled={busy}>
-            {busy ? "正在处理…" : register ? "创建账号" : "登录"}
-          </Button>
           <Button
-            type="button"
-            variant="link"
+            className="account-submit"
+            type="submit"
             disabled={busy}
-            onClick={() => {
-              setRegister(!register);
-              setError(null);
-              setPassword("");
-              setConfirm("");
-            }}
+            aria-busy={busy}
           >
-            {register ? "已有账号？返回登录" : "还没有账号？注册"}
+            {busy ? "正在处理…" : register ? "创建账号" : "登录"}
+            {busy ? <LoaderCircle className="spin" /> : <ArrowRight />}
           </Button>
+          <div className="account-switch">
+            <span>{register ? "已有账号？" : "还没有账号？"}</span>
+            <Button
+              type="button"
+              variant="link"
+              disabled={busy}
+              onClick={() => {
+                setRegister(!register);
+                setError(null);
+                setPassword("");
+                setConfirm("");
+              }}
+            >
+              {register ? "返回登录" : "注册"}
+            </Button>
+          </div>
         </form>
       </section>
     </main>

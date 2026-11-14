@@ -325,7 +325,7 @@ function WorkspaceShell({
                           <SidebarMenuButton
                             render={<NavLink to={item.url} />}
                             isActive={location.pathname.startsWith(item.url)}
-                            className="gap-2.5 md:h-9 data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground data-active:font-semibold"
+                            className="workspace-nav-link gap-2.5 md:h-9 data-active:bg-sidebar-primary data-active:text-sidebar-primary-foreground data-active:font-semibold"
                             aria-label={item.text}
                             tooltip={item.text}
                             onClick={() => setOpenMobile(false)}
@@ -387,6 +387,7 @@ function WorkspaceShell({
           <div className="flex shrink-0 items-center gap-2 md:gap-3">
             <Button
               variant="outline"
+              className="console-search-trigger"
               aria-label="快速导航"
               title="快速导航（⌘ K / Ctrl K）"
               aria-keyshortcuts="Meta+k Control+k"
@@ -394,7 +395,7 @@ function WorkspaceShell({
             >
               <Search />
               <span className="hidden sm:inline">快速导航</span>
-              <kbd className="ml-2 hidden sm:inline-flex" aria-hidden="true">
+              <kbd className="ml-auto hidden sm:inline-flex" aria-hidden="true">
                 {navigator.platform.startsWith("Mac") ? "⌘ K" : "Ctrl K"}
               </kbd>
             </Button>
